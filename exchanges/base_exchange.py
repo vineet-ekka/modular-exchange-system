@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import warnings
 from utils.health_tracker import record_exchange_result
+from utils.rate_limiter import rate_limiter
 warnings.filterwarnings('ignore')
 
 
@@ -125,14 +126,20 @@ class BaseExchange(ABC):
             JSON response data or None if failed
         """
         try:
-            if delay > 0:
-                time.sleep(delay)
+            # Use the new rate limiter instead of simple sleep
+            rate_limiter.acquire(self.name)
             
             response = requests.get(url, params=params, timeout=10)
             
             # Handle different response codes
             if response.status_code == 200:
                 return response.json()
+            elif response.status_code == 429:
+                # Rate limit hit - let the rate limiter handle backoff
+                retry_after = response.headers.get('Retry-After')
+                retry_after_seconds = float(retry_after) if retry_after else None
+                rate_limiter.handle_429(self.name, retry_after_seconds)
+                return None
             elif response.status_code in [400, 404] and silent_errors:
                 # Common for API endpoints that don't support certain symbols
                 return None

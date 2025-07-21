@@ -11,6 +11,7 @@ import aiohttp
 from typing import List, Dict, Optional
 from .base_exchange import BaseExchange
 from config.settings import ENABLE_OPEN_INTEREST_FETCH
+from utils.rate_limiter import rate_limiter
 
 
 class BinanceExchange(BaseExchange):
@@ -215,6 +216,11 @@ class BinanceExchange(BaseExchange):
         """
         async with semaphore:  # Rate limiting
             try:
+                # Acquire rate limit token
+                await asyncio.get_event_loop().run_in_executor(
+                    None, rate_limiter.acquire, self.name
+                )
+                
                 url = f"{base_url}openInterest"
                 params = {'symbol': symbol}
                 
@@ -226,6 +232,13 @@ class BinanceExchange(BaseExchange):
                                 'symbol': symbol,
                                 'openInterest': data['openInterest']
                             }
+                    elif response.status == 429:
+                        # Handle rate limit
+                        retry_after = response.headers.get('Retry-After')
+                        retry_after_seconds = float(retry_after) if retry_after else None
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, rate_limiter.handle_429, self.name, retry_after_seconds
+                        )
                     
                     # Silent failure for 400 errors (expected for some symbols)
                     return None
