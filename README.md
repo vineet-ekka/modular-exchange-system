@@ -458,7 +458,3 @@ To add a new exchange:
 - Smart rate limiting implementation
 - Health monitoring system
 - Support for Backpack, Binance, and KuCoin exchanges
-
-## 📄 License
-
-This project is open source and available under the MIT License. 
