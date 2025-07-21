@@ -446,12 +446,13 @@ To add a new exchange:
 
 ## 📋 Changelog
 
-### 2025-07-22
+### 2025-07-22 ✅ MERGED
 - **Fixed**: Historical collection duration parameter now works correctly
   - The `--duration` flag properly stops collection after specified time
   - No more indefinite running when duration is set
-- **Updated**: README with clearer historical collection examples
+- **Updated**: All documentation with clearer historical collection examples
 - **Added**: Troubleshooting guidance for stuck processes
+- **Status**: Fix merged to master branch via PR #1
 
 ### 2025-07-21
 - Initial release with historical data collection system

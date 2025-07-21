@@ -444,7 +444,7 @@ Final Statistics:
 
 ### Resources
 - Project location: `D:\CC_Project\modular_exchange_system`
-- GitHub repository: https://github.com/estalocanegro/modular-exchange-system
+- GitHub repository: https://github.com/vineet-ekka/modular-exchange-system
 - Dependencies: See `requirements.txt`
 - Example usage: See `example_usage.py`
 - User documentation: See `README.md`

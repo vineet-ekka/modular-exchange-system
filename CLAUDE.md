@@ -274,7 +274,7 @@ python main_historical.py --no-upload --duration 300
 - Health monitoring provides actionable intelligence
 - All times internally handled as UTC
 - Git repository initialized with .gitignore and .env.example
-- GitHub repository: https://github.com/estalocanegro/modular-exchange-system
+- GitHub repository: https://github.com/vineet-ekka/modular-exchange-system
 - Historical data collection fully implemented and tested
 - Rate limiting prevents API bans automatically
 - Windows compatibility ensured throughout
