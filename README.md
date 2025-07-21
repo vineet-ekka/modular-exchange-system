@@ -29,8 +29,12 @@ modular_exchange_system/
 ├── database/
 │   └── supabase_manager.py  # Database operations
 ├── utils/
-│   └── logger.py            # Logging utilities
-├── main.py                  # ⭐ MAIN ENTRY POINT
+│   ├── logger.py            # Logging utilities
+│   ├── health_tracker.py    # Exchange health monitoring
+│   ├── rate_limiter.py      # Smart rate limiting
+│   └── continuous_fetcher.py # Continuous data collection
+├── main.py                  # ⭐ MAIN ENTRY POINT - Real-time data
+├── main_historical.py       # ⭐ ENTRY POINT - Historical collection
 ├── requirements.txt         # Python dependencies
 └── README.md               # This file
 ```
@@ -72,10 +76,51 @@ EXCHANGES = {
 DISPLAY_LIMIT = 30  # How many rows to show
 ```
 
-### 4. Run the System
+### 4. Create Database Tables
+If using historical data collection, create the historical table in Supabase:
+- Go to your Supabase dashboard
+- Navigate to SQL Editor
+- Run the SQL from `create_historical_table.sql`
+
+### 5. Run the System
+
+**For real-time data collection:**
 ```bash
 python main.py
 ```
+
+**For historical data collection:**
+```bash
+python main_historical.py
+```
+
+## ⭐ Features
+
+### Real-Time Data Collection
+- Fetches perpetual futures data from multiple exchanges
+- Calculates annualized percentage rates (APR) from funding rates
+- Exports to CSV and uploads to Supabase database
+- Health monitoring for exchange API reliability
+- Displays funding rates with APR calculations
+
+### Historical Data Collection
+- **Continuous Collection**: Automatically fetches data at regular intervals
+- **Time-Series Storage**: Preserves all historical data with timestamps
+- **Flexible Querying**: Filter by time range, exchange, or symbol
+- **Resilient Operation**: Handles failures gracefully with retry logic
+- **Progress Reporting**: Real-time statistics and monitoring
+
+### Smart Rate Limiting
+- **Per-Exchange Limits**: Respects individual exchange rate limits
+- **Token Bucket Algorithm**: Smooth request distribution
+- **Automatic 429 Handling**: Backs off when rate limited
+- **Real-Time Monitoring**: Shows rate limit status
+
+### Health Monitoring
+- **Exchange Reliability**: Tracks API success/failure rates
+- **24-Hour Window**: Rolling health scores for each exchange
+- **System Health**: Overall system health assessment
+- **Status Indicators**: Clear OK/WARN/FAIL status
 
 ## ⭐ Easy Customization for Non-Coders
 
@@ -118,6 +163,15 @@ ENABLE_CONSOLE_DISPLAY = True # Show results in console
 #### Rate Limiting
 ```python
 API_DELAY = 0.5  # Delay between API calls (seconds)
+```
+
+#### Historical Collection Settings
+```python
+ENABLE_HISTORICAL_COLLECTION = True  # Enable historical data collection
+HISTORICAL_FETCH_INTERVAL = 300      # Fetch every 5 minutes
+HISTORICAL_TABLE_NAME = "exchange_data_historical"
+HISTORICAL_MAX_RETRIES = 3           # Retry failed fetches
+HISTORICAL_BASE_BACKOFF = 60         # Base backoff time in seconds
 ```
 
 ### 🔄 Adding New Exchanges
@@ -247,26 +301,102 @@ data = db.fetch_data({'exchange': 'Binance'})
 info = db.get_table_info()
 ```
 
+### Historical Data Collection
+
+**Setting up Historical Collection:**
+1. First, create the historical table in Supabase (see `HISTORICAL_SETUP.md`)
+2. Configure settings in `config/settings.py`:
+```python
+ENABLE_HISTORICAL_COLLECTION = True
+HISTORICAL_FETCH_INTERVAL = 300  # 5 minutes
+HISTORICAL_TABLE_NAME = "exchange_data_historical"
+```
+
+**Running Historical Collection:**
+```bash
+# Run continuous historical data collection (indefinitely)
+python main_historical.py
+
+# Run with custom interval (60 seconds)
+python main_historical.py --interval 60
+
+# Run for specific duration (2 hours = 7200 seconds)
+python main_historical.py --duration 7200
+
+# Common examples:
+# - Test run: 3 fetches over 3 minutes
+python main_historical.py --interval 60 --duration 180
+
+# - Production run: Every 5 minutes for 24 hours
+python main_historical.py --interval 300 --duration 86400
+
+# View historical data summary
+python main_historical.py --summary
+
+# Dry run without database upload
+python main_historical.py --no-upload --duration 60
+
+# Verbose mode (shows top APR contracts)
+python main_historical.py --verbose --duration 300
+```
+
+⚠️ **IMPORTANT**: The `--duration` parameter ensures the collection stops after the specified time. Without it, the collection runs indefinitely until manually stopped with Ctrl+C.
+
+**Querying Historical Data:**
+```python
+from database.supabase_manager import SupabaseManager
+from datetime import datetime, timedelta
+
+db = SupabaseManager()
+
+# Get last 24 hours of data
+end_time = datetime.now()
+start_time = end_time - timedelta(hours=24)
+historical_data = db.fetch_historical_data(
+    start_time=start_time,
+    end_time=end_time,
+    exchanges=['binance', 'kucoin'],
+    limit=1000
+)
+
+# Get historical summary
+summary = db.get_historical_summary()
+print(f"Total records: {summary['total_records']:,}")
+print(f"Date range: {summary['oldest_record']} to {summary['newest_record']}")
+```
+
 ## 🛠️ Troubleshooting
 
 ### Common Issues
 
 1. **Database Connection Failed**
-   - Check your Supabase URL and key in `config/settings.py`
+   - Check your Supabase URL and key in `.env` file
    - Ensure your Supabase project is active
+   - Verify credentials are correct
 
 2. **No Data Retrieved**
    - Check if exchanges are enabled in `config/settings.py`
    - Verify internet connection
    - Check if exchange APIs are working
+   - Review health status output
 
 3. **Rate Limiting Errors**
-   - Increase `API_DELAY` in `config/settings.py`
-   - Disable some exchanges temporarily
+   - The system handles rate limits automatically
+   - Check console for backoff messages
+   - Adjust fetch intervals if needed
 
 4. **Import Errors**
    - Ensure all dependencies are installed: `pip install -r requirements.txt`
-   - Check Python version (3.7+ required)
+   - Check Python version (3.8+ required)
+
+5. **Historical Collection Issues**
+   - Ensure historical table exists in Supabase
+   - Check `HISTORICAL_SETUP.md` for setup instructions
+   - Verify `ENABLE_HISTORICAL_COLLECTION = True`
+   - Use `--summary` to check table status
+   - **Duration not working**: Update to latest code - bug fixed on 2025-07-22
+   - **Process won't stop**: Always use `--duration` parameter or Ctrl+C
+   - **Check for stuck processes**: `tasklist | findstr python` (Windows)
 
 ### Debug Mode
 Enable debug mode in `config/settings.py`:
@@ -277,12 +407,24 @@ SHOW_SAMPLE_DATA = True
 
 ## 📝 File Descriptions
 
-- **`main.py`**: Main entry point - run this to start the system
+- **`main.py`**: Main entry point for real-time data collection
+- **`main_historical.py`**: Entry point for continuous historical collection
 - **`config/settings.py`**: ⭐ **EASY TO EDIT** - All your configuration here
-- **`exchanges/`**: Exchange-specific modules (don't edit unless adding new exchanges)
-- **`data_processing/data_processor.py`**: Data analysis and display logic
-- **`database/supabase_manager.py`**: Database operations
-- **`utils/logger.py`**: Logging utilities
+- **`.env`**: Sensitive credentials (Supabase URL/key)
+- **`exchanges/`**: Exchange-specific modules
+  - `base_exchange.py`: Base class all exchanges inherit from
+  - `exchange_factory.py`: Manages exchange instances
+  - Individual exchange implementations (backpack, binance, kucoin)
+- **`data_processing/data_processor.py`**: APR calculation and display logic
+- **`database/supabase_manager.py`**: Database operations (regular & historical)
+- **`utils/`**: Utility modules
+  - `logger.py`: Logging functionality
+  - `health_tracker.py`: Exchange health monitoring
+  - `rate_limiter.py`: Smart rate limiting
+  - `continuous_fetcher.py`: Continuous collection engine
+  - `data_validator.py`: Business-focused validation
+- **`create_historical_table.sql`**: SQL to create historical table
+- **`HISTORICAL_SETUP.md`**: Setup guide for historical collection
 
 ## 🎯 Key Benefits for Non-Coders
 
@@ -301,6 +443,21 @@ To add a new exchange:
 3. Implement `fetch_data()` and `normalize_data()` methods
 4. Add to `exchange_factory.py`
 5. Enable in `config/settings.py`
+
+## 📋 Changelog
+
+### 2025-07-22
+- **Fixed**: Historical collection duration parameter now works correctly
+  - The `--duration` flag properly stops collection after specified time
+  - No more indefinite running when duration is set
+- **Updated**: README with clearer historical collection examples
+- **Added**: Troubleshooting guidance for stuck processes
+
+### 2025-07-21
+- Initial release with historical data collection system
+- Smart rate limiting implementation
+- Health monitoring system
+- Support for Backpack, Binance, and KuCoin exchanges
 
 ## 📄 License
 

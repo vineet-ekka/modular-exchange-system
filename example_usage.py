@@ -81,6 +81,29 @@ def example_show_settings():
         print(f"❌ Disabled: {disabled}")
 
 
+def example_historical_collection():
+    """
+    Example commands for historical data collection.
+    """
+    print("\n=== HISTORICAL DATA COLLECTION EXAMPLES ===")
+    print("# IMPORTANT: Always use --duration to avoid indefinite runs!")
+    print()
+    print("1. Quick test (3 minutes, 1-minute intervals):")
+    print("   python main_historical.py --interval 60 --duration 180")
+    print()
+    print("2. Production run (24 hours, 5-minute intervals):")
+    print("   python main_historical.py --interval 300 --duration 86400")
+    print()
+    print("3. High-frequency monitoring (1 hour, 30-second intervals):")
+    print("   python main_historical.py --interval 30 --duration 3600")
+    print()
+    print("4. View historical data summary:")
+    print("   python main_historical.py --summary")
+    print()
+    print("5. Dry run without database upload:")
+    print("   python main_historical.py --no-upload --duration 300")
+
+
 def example_quick_tips():
     """
     Quick tips for non-coders.
@@ -99,6 +122,8 @@ def example_quick_tips():
     print("   Change DEBUG_MODE = False to DEBUG_MODE = True")
     print()
     print("5. To add a new exchange: Follow the README.md guide")
+    print()
+    print("6. For historical data collection: ALWAYS use --duration flag!")
 
 
 if __name__ == "__main__":
@@ -113,6 +138,9 @@ if __name__ == "__main__":
     
     # Run custom analysis example
     example_custom_analysis()
+    
+    # Show historical collection examples
+    example_historical_collection()
     
     # Show quick tips
     example_quick_tips()

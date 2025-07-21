@@ -12,6 +12,8 @@ from config.settings import (
     SUPABASE_URL, SUPABASE_KEY, DATABASE_TABLE_NAME,
     ENABLE_DATABASE_UPLOAD, SHOW_SAMPLE_DATA
 )
+from datetime import datetime
+import config.settings as settings
 
 
 class SupabaseManager:
@@ -32,6 +34,12 @@ class SupabaseManager:
             'funding_interval_hours', 'index_price', 'mark_price',
             'open_interest', 'contract_type', 'market_type'
         ]
+        
+        # Historical table columns (includes timestamp)
+        self.historical_table_columns = self.table_columns + ['timestamp', 'apr']
+        
+        # Historical table name (will be configurable in settings)
+        self.historical_table_name = getattr(settings, 'HISTORICAL_TABLE_NAME', 'exchange_data_historical')
     
     def upload_data(self, data: pd.DataFrame) -> bool:
         """
@@ -234,3 +242,199 @@ class SupabaseManager:
         except Exception as e:
             print(f"X Supabase connection failed: {e}")
             return False 
+    
+    def upload_historical_data(self, data: pd.DataFrame) -> bool:
+        """
+        Upload DataFrame to historical table with timestamp.
+        Uses INSERT (not UPSERT) to preserve all historical records.
+        
+        Args:
+            data: DataFrame to upload (must include timestamp column)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not ENABLE_DATABASE_UPLOAD:
+            print("Database upload is disabled in settings")
+            return False
+        
+        if data.empty:
+            print("No data to upload")
+            return False
+        
+        # Check if timestamp column exists
+        if 'timestamp' not in data.columns:
+            print("! Error: Historical data must include timestamp column")
+            return False
+        
+        try:
+            # Prepare data for historical upload
+            df_to_upload = self._prepare_historical_data(data)
+            
+            if df_to_upload.empty:
+                print("No valid data to upload after preparation")
+                return False
+            
+            # Convert to records
+            records = df_to_upload.to_dict(orient='records')
+            
+            # Show sample data if enabled
+            if SHOW_SAMPLE_DATA and records:
+                print("Sample historical row to upload:", records[0])
+            
+            # Upload data in batches (using INSERT, not UPSERT)
+            batch_size = 100
+            total_uploaded = 0
+            
+            for i in range(0, len(records), batch_size):
+                batch = records[i:i + batch_size]
+                try:
+                    # Use insert to preserve all historical records
+                    self.client.table(self.historical_table_name).insert(batch).execute()
+                    total_uploaded += len(batch)
+                    print(f"  Uploaded historical batch {i//batch_size + 1}/{(len(records) + batch_size - 1)//batch_size} ({len(batch)} records)")
+                except Exception as e:
+                    print(f"! Error uploading historical batch {i//batch_size + 1}: {e}")
+                    # Continue with next batch on error
+            
+            print(f"OK Uploaded {total_uploaded}/{len(records)} rows to historical table '{self.historical_table_name}'")
+            return total_uploaded > 0
+            
+        except Exception as e:
+            print(f"X Error uploading to historical table: {e}")
+            return False
+    
+    def _prepare_historical_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Prepare DataFrame for historical upload.
+        
+        Args:
+            df: Raw DataFrame with timestamp
+            
+        Returns:
+            Prepared DataFrame ready for historical upload
+        """
+        # Get available columns from historical columns list
+        available_columns = [col for col in self.historical_table_columns if col in df.columns]
+        df_to_upload = df[available_columns].copy()
+        
+        # Ensure timestamp is in ISO format
+        if 'timestamp' in df_to_upload.columns:
+            if pd.api.types.is_datetime64_any_dtype(df_to_upload['timestamp']):
+                df_to_upload['timestamp'] = df_to_upload['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+            else:
+                # Try to convert to datetime if it's a string
+                try:
+                    df_to_upload['timestamp'] = pd.to_datetime(df_to_upload['timestamp']).dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+                except:
+                    pass
+        
+        # Convert other datetime columns to ISO format strings
+        for col in df_to_upload.columns:
+            if col != 'timestamp' and pd.api.types.is_datetime64_any_dtype(df_to_upload[col]):
+                df_to_upload[col] = df_to_upload[col].dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+        
+        # Replace NaN, inf, -inf with None
+        df_to_upload = df_to_upload.replace([np.nan, np.inf, -np.inf], None)
+        
+        # Remove rows that are completely empty
+        df_to_upload = df_to_upload.dropna(how='all')
+        
+        return df_to_upload
+    
+    def fetch_historical_data(self, 
+                            start_time: Optional[datetime] = None,
+                            end_time: Optional[datetime] = None,
+                            exchanges: Optional[List[str]] = None,
+                            symbols: Optional[List[str]] = None,
+                            limit: Optional[int] = None) -> pd.DataFrame:
+        """
+        Fetch historical data with time range and filters.
+        
+        Args:
+            start_time: Start of time range (inclusive)
+            end_time: End of time range (inclusive)
+            exchanges: List of exchanges to filter
+            symbols: List of symbols to filter
+            limit: Maximum number of records to return
+            
+        Returns:
+            DataFrame with historical data
+        """
+        try:
+            query = self.client.table(self.historical_table_name).select('*')
+            
+            # Apply time range filters
+            if start_time:
+                query = query.gte('timestamp', start_time.isoformat())
+            if end_time:
+                query = query.lte('timestamp', end_time.isoformat())
+            
+            # Apply exchange filter
+            if exchanges:
+                query = query.in_('exchange', exchanges)
+            
+            # Apply symbol filter
+            if symbols:
+                query = query.in_('symbol', symbols)
+            
+            # Apply limit
+            if limit:
+                query = query.limit(limit)
+            
+            # Order by timestamp descending (most recent first)
+            query = query.order('timestamp', desc=True)
+            
+            response = query.execute()
+            
+            if response.data:
+                df = pd.DataFrame(response.data)
+                # Convert timestamp back to datetime
+                if 'timestamp' in df.columns:
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                return df
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"X Error fetching historical data: {e}")
+            return pd.DataFrame()
+    
+    def get_historical_summary(self) -> Dict:
+        """
+        Get summary statistics for historical table.
+        
+        Returns:
+            Dictionary with summary stats
+        """
+        try:
+            # Get total count
+            count_response = self.client.table(self.historical_table_name).select('*', count='exact').execute()
+            total_count = count_response.count if hasattr(count_response, 'count') else 0
+            
+            # Get time range
+            oldest = self.client.table(self.historical_table_name).select('timestamp').order('timestamp').limit(1).execute()
+            newest = self.client.table(self.historical_table_name).select('timestamp').order('timestamp', desc=True).limit(1).execute()
+            
+            oldest_time = oldest.data[0]['timestamp'] if oldest.data else None
+            newest_time = newest.data[0]['timestamp'] if newest.data else None
+            
+            # Get unique exchanges and symbols count
+            exchanges_response = self.client.table(self.historical_table_name).select('exchange').execute()
+            symbols_response = self.client.table(self.historical_table_name).select('symbol').execute()
+            
+            unique_exchanges = len(set(row['exchange'] for row in exchanges_response.data)) if exchanges_response.data else 0
+            unique_symbols = len(set(row['symbol'] for row in symbols_response.data)) if symbols_response.data else 0
+            
+            return {
+                'table_name': self.historical_table_name,
+                'total_records': total_count,
+                'oldest_record': oldest_time,
+                'newest_record': newest_time,
+                'unique_exchanges': unique_exchanges,
+                'unique_symbols': unique_symbols
+            }
+            
+        except Exception as e:
+            print(f"X Error getting historical summary: {e}")
+            return {}

@@ -84,6 +84,24 @@ DEBUG_MODE = False
 SHOW_SAMPLE_DATA = False 
 
 # =============================================================================
+# HISTORICAL DATA COLLECTION SETTINGS
+# =============================================================================
+# Enable/disable continuous historical data collection
+ENABLE_HISTORICAL_COLLECTION = True
+
+# Fetch interval in seconds (default: 300 = 5 minutes)
+HISTORICAL_FETCH_INTERVAL = 300
+
+# Historical table name in Supabase
+HISTORICAL_TABLE_NAME = "exchange_data_historical"
+
+# Maximum retry attempts for failed fetches
+HISTORICAL_MAX_RETRIES = 3
+
+# Base backoff time in seconds for retries
+HISTORICAL_BASE_BACKOFF = 60
+
+# =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
 # Validation is now done in main.py when the system starts
