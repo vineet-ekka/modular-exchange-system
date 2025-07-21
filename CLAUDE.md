@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference
+
+### Key Files to Know
+- **config/settings.py** - User configuration (exchanges, display, output)
+- **main.py** - Entry point for running the system
+- **.env** - Sensitive credentials (Supabase URL/key)
+- **exchanges/** - Exchange-specific implementations
+- **data_processing/data_processor.py** - APR calculation and display logic
+
+### Common Tasks
+- **Run the system**: `python main.py`
+- **Test imports**: `python -c "from main import ExchangeDataSystem"`
+- **Check Git status**: `git status`
+- **Run CI locally**: Install flake8, black, isort and run them
+- **View logs**: Check console output (no log files by default)
+
 ## Project Overview
 
 A modular cryptocurrency exchange data system that fetches perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin), normalizes it, calculates APR, and can export to CSV or upload to Supabase database.
@@ -26,7 +42,7 @@ python example_usage.py
 ### Configuration
 - **Primary configuration**: `config/settings.py` - Toggle exchanges, set display limits, enable/disable features
 - **Environment variables**: `.env` file for sensitive credentials (Supabase URL/key)
-- **No .env.example exists**: You'll need to create .env manually with:
+- **.env.example exists**: Copy and edit with your credentials:
   ```
   SUPABASE_URL=your_url
   SUPABASE_KEY=your_key
@@ -118,9 +134,82 @@ All exchanges normalize to these columns:
 - Batch size in `supabase_manager.py` (currently 100)
 - Max concurrent requests in `binance_exchange.py` (currently 20)
 
+## Git Workflow
+
+### Branches
+- **master**: Stable production code
+- **feature/historical-data-collection**: Current development branch
+- Create feature branches for new functionality: `git checkout -b feature/new-feature`
+
+### Common Git Commands
+```bash
+# Check status
+git status
+
+# Stage changes
+git add .
+
+# Commit with descriptive message
+git commit -m "Add feature: description"
+
+# Push to GitHub
+git push
+
+# Create pull request
+gh pr create --title "Add feature" --body "Description of changes"
+```
+
+### GitHub Actions CI/CD
+The repository includes automated testing on push:
+- Python 3.8, 3.9, 3.10, 3.11 compatibility
+- Code linting with flake8
+- Code formatting checks with black and isort
+- Configuration validation
+- Import testing
+
+## Planned Features
+
+### Historical Data Collection System
+Currently in planning phase on `feature/historical-data-collection` branch:
+
+#### Components to Implement
+1. **utils/rate_limiter.py**
+   - Per-exchange rate limits (Binance: 2400/min, KuCoin: 100/10s)
+   - Token bucket algorithm
+   - Automatic backoff on 429 responses
+
+2. **utils/continuous_fetcher.py**
+   - Configurable fetch intervals (default: 5 minutes)
+   - Graceful shutdown handling
+   - Error recovery with exponential backoff
+
+3. **main_historical.py**
+   - Entry point for continuous collection
+   - Command-line arguments for configuration
+   - Progress reporting
+
+4. **Enhanced database/supabase_manager.py**
+   - New `upload_historical_data()` method
+   - INSERT operations (not UPSERT) to preserve history
+   - Time-range query support
+
+#### Database Schema
+New table: `exchange_data_historical` with:
+- All existing columns plus timestamp
+- Indexes on timestamp and exchange+symbol+timestamp
+
+#### Configuration (to add to settings.py)
+```python
+HISTORICAL_FETCH_INTERVAL = 300  # seconds
+HISTORICAL_TABLE_NAME = "exchange_data_historical"
+ENABLE_HISTORICAL_COLLECTION = True
+```
+
 ## Important Notes
 - System designed for non-coders to modify via settings.py
 - Validation focuses on business logic, not data purity
 - Health monitoring provides actionable intelligence
 - All times internally handled as UTC
-- Missing .gitignore and .env.example files in current setup
+- Git repository initialized with .gitignore and .env.example
+- GitHub repository: https://github.com/estalocanegro/modular-exchange-system
+- Active development on branch: feature/historical-data-collection
