@@ -31,12 +31,12 @@ class SupabaseManager:
         # Define table columns exactly as in Supabase
         self.table_columns = [
             'exchange', 'symbol', 'base_asset', 'quote_asset', 'funding_rate',
-            'funding_interval_hours', 'index_price', 'mark_price',
+            'funding_interval_hours', 'apr', 'index_price', 'mark_price',
             'open_interest', 'contract_type', 'market_type'
         ]
         
         # Historical table columns (includes timestamp)
-        self.historical_table_columns = self.table_columns + ['timestamp', 'apr']
+        self.historical_table_columns = self.table_columns + ['timestamp']
         
         # Historical table name (will be configurable in settings)
         self.historical_table_name = getattr(settings, 'HISTORICAL_TABLE_NAME', 'exchange_data_historical')
