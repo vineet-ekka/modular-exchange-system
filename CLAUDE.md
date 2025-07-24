@@ -331,10 +331,10 @@ python main_historical.py --no-upload --duration 300
 ### Performance Metrics (Loop Mode)
 
 Based on production testing with `--interval 30 --duration 300`:
-- **Throughput**: 1,010 contracts per run
+- **Throughput**: 1,034 contracts per run
 - **Execution time**: ~16 seconds per complete cycle
 - **Success rate**: 100% (10/10 runs successful)
-- **Database performance**: <2 seconds for 1,010 UPSERT operations
+- **Database performance**: <2 seconds for 1,034 UPSERT operations
 - **Memory usage**: Stable, no leaks detected
 - **API reliability**: All exchanges maintained 100% health score
 

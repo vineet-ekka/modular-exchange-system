@@ -281,15 +281,17 @@ UNIFIED EXCHANGE DATA SUMMARY
 ================================================================================
 
 Contracts by Exchange:
-  Binance: 245
-  Backpack: 89
-  KuCoin: 156
+  Binance: 527
+  KuCoin: 452
+  Backpack: 35
+  Deribit: 20
 
 Contracts by Market Type:
-  Binance USD-M: 180
-  Binance COIN-M: 65
-  Backpack PERP: 89
-  KuCoin Futures: 156
+  Binance USD-M: 491
+  KuCoin Futures: 452
+  Binance COIN-M: 36
+  Backpack PERP: 35
+  Deribit PERP: 20
 
 Funding Rate Statistics:
   Average: 0.000123
@@ -373,11 +375,11 @@ python main_historical.py --interval 300 --duration 86400  # 24 hours
 ### Performance Metrics
 
 **Loop Mode Performance (Tested 2025-07-22):**
-- **Data volume**: 1,010 contracts per run
+- **Data volume**: 1,034 contracts per run
 - **Execution time**: ~16 seconds per complete cycle
 - **Success rate**: 100% (10 consecutive runs)
 - **Database performance**: <2 seconds for batch UPSERT
-- **Exchange breakdown**: Binance (524), KuCoin (451), Backpack (35)
+- **Exchange breakdown**: Binance (527), KuCoin (452), Backpack (35), Deribit (20)
 - **API reliability**: All exchanges maintained 100% health score
 - **Memory usage**: Stable with no leaks detected
 
@@ -591,4 +593,4 @@ To add a new exchange:
 - Initial release with historical data collection system
 - Smart rate limiting implementation
 - Health monitoring system
-- Support for Backpack, Binance, and KuCoin exchanges
+- Support for Backpack, Binance, KuCoin, and Deribit exchanges
