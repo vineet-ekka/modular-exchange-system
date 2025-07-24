@@ -26,10 +26,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **View logs**: Check console output (no log files by default)
 - **Check for stuck processes**: `tasklist | findstr python` (Windows)
 - **Add APR column to database**: Run `add_apr_column.sql` in Supabase SQL Editor
+- **View historical CSV**: Open `historical_exchange_data.csv` (cumulative data)
 
 ## Project Overview
 
-A modular cryptocurrency exchange data system that fetches perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin), normalizes it, calculates APR, and can export to CSV or upload to Supabase database. Features both real-time data collection and continuous historical time-series storage.
+A modular cryptocurrency exchange data system that fetches perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin, Deribit), normalizes it, calculates APR, and can export to CSV or upload to Supabase database. Features both real-time data collection and continuous historical time-series storage.
 
 ## Essential Commands
 
@@ -75,6 +76,7 @@ python example_usage.py
   SUPABASE_KEY=your_key
   DATABASE_TABLE_NAME=exchange_data
   ```
+- **CSV Export**: Historical data automatically exports to `historical_exchange_data.csv`
 
 ## Main.py vs Main_historical.py
 
@@ -152,6 +154,7 @@ All exchanges normalize to these columns:
 - **Binance**: Separate USD-M and COIN-M markets, filters non-trading contracts
 - **KuCoin**: Different funding time field names, millisecond conversions needed
 - **Backpack**: Simple REST API, funding interval in milliseconds
+- **Deribit**: Fixed 8-hour funding intervals, open interest in contracts (converted to USD)
 
 ### Windows Compatibility
 - All Unicode characters replaced with ASCII (no emojis)
@@ -233,6 +236,13 @@ The repository includes automated testing on push:
 
 The historical data collection system is now fully implemented and ready for use:
 
+### NEW: CSV Export Feature (2025-07-24)
+- Historical data now automatically exports to CSV alongside database uploads
+- Single cumulative file: `historical_exchange_data.csv`
+- Headers written on first run, data appended on subsequent runs
+- Configured via `HISTORICAL_CSV_FILENAME` in settings.py
+- Works when `ENABLE_CSV_EXPORT = True`
+
 ### Components Implemented
 1. **utils/rate_limiter.py**
    - Token bucket algorithm with per-exchange limits
@@ -264,6 +274,7 @@ The historical data collection system is now fully implemented and ready for use
 ENABLE_HISTORICAL_COLLECTION = True
 HISTORICAL_FETCH_INTERVAL = 300  # seconds
 HISTORICAL_TABLE_NAME = "exchange_data_historical"
+HISTORICAL_CSV_FILENAME = "historical_exchange_data"  # CSV export filename
 HISTORICAL_MAX_RETRIES = 3
 HISTORICAL_BASE_BACKOFF = 60
 ```
@@ -390,7 +401,25 @@ Based on production testing with `--interval 30 --duration 300`:
 - Check health scores regularly
 - Monitor rate limiter status in output
 
-## Recent Changes (2025-07-22)
+## Recent Changes
+
+### 2025-07-24
+- **Deribit Exchange Added**:
+  - New exchange implementation in `exchanges/deribit_exchange.py`
+  - Supports all perpetual contracts (BTC, ETH, SOL, MATIC, USDC)
+  - Uses 8-hour funding interval (standard display rate)
+  - Note: Deribit uses continuous millisecond-level funding payments
+  - Converts open interest from contracts to USD
+  - Added to exchange factory and settings
+  
+- **Historical CSV Export**:
+  - Historical data now exports to single cumulative CSV file
+  - File: `historical_exchange_data.csv` (appends on each collection)
+  - Headers written on first run only
+  - Configured via `HISTORICAL_CSV_FILENAME` setting
+  - Works alongside Supabase uploads for dual storage
+
+### 2025-07-22
 
 ### APR Column Fix ✅ FIXED
 - **Issue**: APR column was missing from database uploads

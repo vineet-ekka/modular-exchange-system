@@ -10,6 +10,7 @@ from .base_exchange import BaseExchange
 from .backpack_exchange import BackpackExchange
 from .binance_exchange import BinanceExchange
 from .kucoin_exchange import KuCoinExchange
+from .deribit_exchange import DeribitExchange
 
 
 class ExchangeFactory:
@@ -40,6 +41,7 @@ class ExchangeFactory:
             'backpack': BackpackExchange,
             'binance': BinanceExchange,
             'kucoin': KuCoinExchange,
+            'deribit': DeribitExchange,
             # Add new exchanges here as they become available
             # 'new_exchange': NewExchangeClass,
         }

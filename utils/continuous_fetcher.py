@@ -16,7 +16,7 @@ from utils.rate_limiter import rate_limiter
 from exchanges.exchange_factory import ExchangeFactory
 from data_processing.data_processor import DataProcessor
 from database.supabase_manager import SupabaseManager
-from config.settings import DEBUG_MODE, EXCHANGES
+from config.settings import DEBUG_MODE, EXCHANGES, HISTORICAL_CSV_FILENAME, ENABLE_CSV_EXPORT
 
 
 class ContinuousFetcher:
@@ -177,6 +177,10 @@ class ContinuousFetcher:
                 # Process data (calculate APR, validate, etc.)
                 self.data_processor = DataProcessor(all_data)
                 
+                # Export to CSV if enabled
+                if ENABLE_CSV_EXPORT:
+                    self._export_to_historical_csv(all_data)
+                
                 # Upload to historical table
                 if self._upload_historical_data(all_data):
                     return all_data
@@ -199,6 +203,39 @@ class ContinuousFetcher:
                     return None
         
         return None
+    
+    def _export_to_historical_csv(self, data: pd.DataFrame) -> Optional[str]:
+        """
+        Export historical data to CSV by appending to existing file.
+        
+        Args:
+            data: DataFrame with timestamp column
+            
+        Returns:
+            Filename where data was exported, or None if failed
+        """
+        try:
+            import os
+            
+            # Use consistent filename
+            filename = f"{HISTORICAL_CSV_FILENAME}.csv"
+            
+            # Check if file exists to determine if we need headers
+            file_exists = os.path.exists(filename)
+            
+            # Append to CSV
+            data.to_csv(filename, mode='a', header=not file_exists, index=False)
+            
+            if file_exists:
+                print(f"OK Data appended to: {filename} ({len(data)} records)")
+            else:
+                print(f"OK Data exported to: {filename} (new file, {len(data)} records)")
+                
+            return filename
+            
+        except Exception as e:
+            print(f"! Could not export to CSV: {str(e)}")
+            return None
     
     def _upload_historical_data(self, data: pd.DataFrame) -> bool:
         """

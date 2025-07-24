@@ -1,6 +1,6 @@
 # Modular Exchange Data System
 
-A modular, easy-to-edit system for fetching and processing exchange data from multiple cryptocurrency exchanges.
+A modular, easy-to-edit system for fetching and processing exchange data from multiple cryptocurrency exchanges (Backpack, Binance, KuCoin, and Deribit).
 
 ## 🚀 New: Loop Mode for Continuous Updates!
 
@@ -34,6 +34,7 @@ modular_exchange_system/
 │   ├── backpack_exchange.py # Backpack exchange module
 │   ├── binance_exchange.py  # Binance exchange module
 │   ├── kucoin_exchange.py   # KuCoin exchange module
+│   ├── deribit_exchange.py  # Deribit exchange module
 │   └── exchange_factory.py  # Manages all exchanges
 ├── data_processing/
 │   └── data_processor.py    # Handles data analysis and display
@@ -81,6 +82,7 @@ EXCHANGES = {
     "backpack": True,   # Set to False to disable
     "binance": True,    # Set to False to disable
     "kucoin": True,     # Set to False to disable
+    "deribit": True,    # Set to False to disable
 }
 
 # Display settings
@@ -131,7 +133,7 @@ python main_historical.py --duration 3600  # 1 hour
 ## ⭐ Features
 
 ### Real-Time Data Collection
-- Fetches perpetual futures data from multiple exchanges
+- Fetches perpetual futures data from multiple exchanges (including Deribit)
 - Calculates annualized percentage rates (APR) from funding rates
 - Exports to CSV and uploads to Supabase database (including APR column)
 - Health monitoring for exchange API reliability
@@ -146,6 +148,7 @@ python main_historical.py --duration 3600  # 1 hour
 ### Historical Data Collection
 - **Continuous Collection**: Automatically fetches data at regular intervals
 - **Time-Series Storage**: Preserves all historical data with timestamps
+- **CSV Export**: Saves data to a cumulative CSV file alongside database storage
 - **Flexible Querying**: Filter by time range, exchange, or symbol
 - **Resilient Operation**: Handles failures gracefully with retry logic
 - **Progress Reporting**: Real-time statistics and monitoring
@@ -183,6 +186,7 @@ EXCHANGES = {
     "backpack": True,   # Enable/disable Backpack
     "binance": True,    # Enable/disable Binance
     "kucoin": True,     # Enable/disable KuCoin
+    "deribit": True,    # Enable/disable Deribit
 }
 ```
 
@@ -210,6 +214,7 @@ API_DELAY = 0.5  # Delay between API calls (seconds)
 ENABLE_HISTORICAL_COLLECTION = True  # Enable historical data collection
 HISTORICAL_FETCH_INTERVAL = 300      # Fetch every 5 minutes
 HISTORICAL_TABLE_NAME = "exchange_data_historical"
+HISTORICAL_CSV_FILENAME = "historical_exchange_data"  # CSV filename for historical data
 HISTORICAL_MAX_RETRIES = 3           # Retry failed fetches
 HISTORICAL_BASE_BACKOFF = 60         # Base backoff time in seconds
 ```
@@ -253,17 +258,18 @@ EXCHANGES = {
     "backpack": True,
     "binance": True,
     "kucoin": True,
+    "deribit": True,
     "new_exchange": True,  # Add this line
 }
 ```
 
 ## 📊 What the System Does
 
-1. **Fetches Data** from enabled exchanges (Backpack, Binance, KuCoin)
+1. **Fetches Data** from enabled exchanges (Backpack, Binance, KuCoin, Deribit)
 2. **Normalizes Data** into a unified format
 3. **Displays Summary** with statistics
 4. **Shows Table** of top funding rates
-5. **Exports to CSV** file
+5. **Exports to CSV** file (separate files for real-time and historical data)
 6. **Uploads to Supabase** database
 
 ## 📈 Output Examples
@@ -503,7 +509,7 @@ SHOW_SAMPLE_DATA = True
 - **`exchanges/`**: Exchange-specific modules
   - `base_exchange.py`: Base class all exchanges inherit from
   - `exchange_factory.py`: Manages exchange instances
-  - Individual exchange implementations (backpack, binance, kucoin)
+  - Individual exchange implementations (backpack, binance, kucoin, deribit)
 - **`data_processing/data_processor.py`**: APR calculation and display logic
 - **`database/supabase_manager.py`**: Database operations (regular & historical)
 - **`utils/`**: Utility modules
@@ -535,6 +541,19 @@ To add a new exchange:
 
 ## 📋 Changelog
 
+### 2025-07-24 ✅ NEW FEATURES - Deribit Exchange & Historical CSV Export
+- **Added**: Deribit exchange integration
+  - Supports all perpetual contracts (BTC, ETH, SOL, MATIC, USDC)
+  - Uses 8-hour funding intervals (standardized display rate)
+  - Converts open interest from contracts to USD
+  - Note: Deribit uses continuous funding payments (millisecond level) but displays as 8-hour rates
+- **Added**: CSV export for historical data collection
+  - Historical data now saves to a single cumulative CSV file
+  - File: `historical_exchange_data.csv` (appends on each collection)
+  - Headers written on first run, data appended thereafter
+  - Works alongside Supabase uploads for dual storage
+- **Updated**: Configuration includes `HISTORICAL_CSV_FILENAME` setting
+
 ### 2025-07-22 ✅ APR COLUMN FIX - Database Upload
 - **Fixed**: APR column now properly included in database uploads
   - Updated `supabase_manager.py` to include APR in table columns
@@ -551,7 +570,7 @@ To add a new exchange:
   - Graceful shutdown with Ctrl+C
 - **Performance**: Tested with 100% success rate
   - 10 runs in 5 minutes with 30-second intervals
-  - 1,010 contracts processed per run
+  - 1,034 contracts processed per run (including Deribit)
   - ~16 seconds execution time per cycle
   - <2 seconds for database batch uploads
   - APR values successfully uploaded

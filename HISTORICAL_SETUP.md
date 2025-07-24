@@ -2,7 +2,7 @@
 
 ## Overview
 
-The historical data collection system continuously fetches cryptocurrency perpetual futures data at regular intervals and stores it in a time-series database. This enables:
+The historical data collection system continuously fetches cryptocurrency perpetual futures data at regular intervals and stores it in both a time-series database and a CSV file. This enables:
 
 - **Trend Analysis**: Track funding rate changes over time
 - **APR Monitoring**: Monitor annualized percentage rate fluctuations
@@ -107,6 +107,12 @@ The historical collection settings are in `config/settings.py`:
 # Enable/disable historical collection
 ENABLE_HISTORICAL_COLLECTION = True
 
+# Enable CSV export for historical data
+ENABLE_CSV_EXPORT = True
+
+# Historical CSV filename (data will be appended to this file)
+HISTORICAL_CSV_FILENAME = "historical_exchange_data"
+
 # Fetch interval in seconds (default: 300 = 5 minutes)
 HISTORICAL_FETCH_INTERVAL = 300
 
@@ -169,8 +175,25 @@ python main_historical.py --no-upload --duration 300
 python main_historical.py -i 120 -d 3600 -v
 ```
 
-### Query Historical Data
+### Working with Historical Data
 
+#### CSV File Access
+Historical data is automatically saved to `historical_exchange_data.csv`:
+- File location: Project root directory
+- Format: Standard CSV with headers
+- Updates: Appends new data on each collection cycle
+- Can be opened in Excel, pandas, or any data analysis tool
+
+```python
+import pandas as pd
+
+# Read historical CSV data
+df = pd.read_csv('historical_exchange_data.csv')
+print(f"Total records: {len(df)}")
+print(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
+```
+
+#### Database Query
 ```python
 from database.supabase_manager import SupabaseManager
 from datetime import datetime, timedelta
@@ -184,7 +207,7 @@ start_time = end_time - timedelta(hours=24)
 historical_data = db.fetch_historical_data(
     start_time=start_time,
     end_time=end_time,
-    exchanges=['binance', 'kucoin'],
+    exchanges=['binance', 'kucoin', 'deribit'],
     limit=1000
 )
 

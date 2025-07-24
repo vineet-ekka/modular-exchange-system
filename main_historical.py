@@ -158,7 +158,9 @@ def main():
     print(f"Fetch interval: {args.interval} seconds")
     print(f"Max duration: {'Indefinite' if not args.duration else f'{args.duration} seconds'}")
     print(f"Database upload: {'Enabled' if settings.ENABLE_DATABASE_UPLOAD else 'Disabled'}")
+    print(f"CSV export: {'Enabled' if settings.ENABLE_CSV_EXPORT else 'Disabled'}")
     print(f"Historical table: {settings.HISTORICAL_TABLE_NAME}")
+    print(f"CSV filename prefix: {settings.HISTORICAL_CSV_FILENAME}")
     print(f"Enabled exchanges: {[k for k, v in settings.EXCHANGES.items() if v]}")
     print("============================================================\n")
     

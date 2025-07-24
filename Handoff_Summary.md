@@ -1,17 +1,18 @@
 # Modular Exchange System - Handoff Summary
 
 ## Project Overview
-A modular system for fetching and processing cryptocurrency perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin). The system normalizes data into a unified format with APR calculations and can export to CSV and upload to Supabase database.
+A modular system for fetching and processing cryptocurrency perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin, Deribit). The system normalizes data into a unified format with APR calculations and can export to CSV and upload to Supabase database.
 
 **⚠️ IMPORTANT**: When using historical collection, ALWAYS specify `--duration` parameter to avoid indefinite runs. Example: `python main_historical.py --duration 3600` for 1 hour.
 
-## Current State (As of 2025-07-22 - UPDATED)
+## Current State (As of 2025-07-24 - UPDATED)
 
 ### Working Features
 1. **Multi-Exchange Support**
    - Binance (USD-M and COIN-M futures)
    - KuCoin (Futures)
    - Backpack (PERP)
+   - Deribit (Perpetual contracts)
 
 2. **Real-Time Data Collection**
    - Funding rates with APR calculation (annualized funding rates)
@@ -24,6 +25,7 @@ A modular system for fetching and processing cryptocurrency perpetual futures da
 3. **Historical Data Collection** ✅ NEW & FIXED
    - Continuous fetching at configurable intervals
    - Time-series storage with timestamps
+   - **CSV export to cumulative file** (NEW 2025-07-24)
    - Smart rate limiting per exchange
    - Automatic retry with exponential backoff
    - Progress reporting and statistics
@@ -286,7 +288,7 @@ Final Statistics:
   Enabled exchanges: ['backpack', 'binance', 'kucoin']
 ```
 
-## LATEST UPDATES (2025-07-21 to 2025-07-22)
+## LATEST UPDATES (2025-07-21 to 2025-07-24)
 
 ### Phase 1: Core Improvements (2025-07-21)
 
@@ -366,6 +368,28 @@ Final Statistics:
    - Tested with `--loop --interval 60 --duration 300`
    - All 5 runs successfully uploaded APR values
    - Database records show correct APR calculations
+
+### Phase 5: Deribit Integration & Historical CSV (2025-07-24)
+
+1. **Deribit Exchange Added** ✅ NEW
+   - Full implementation in `exchanges/deribit_exchange.py`
+   - Supports all perpetual contracts (BTC, ETH, SOL, MATIC, USDC)
+   - 8-hour funding interval (display rate, actual settlement is continuous)
+   - Converts open interest from contracts to USD
+   - Successfully integrated with factory and settings
+
+2. **Historical CSV Export** ✅ NEW
+   - Added cumulative CSV export for historical data
+   - Single file: `historical_exchange_data.csv`
+   - Headers written once, data appended on each collection
+   - New setting: `HISTORICAL_CSV_FILENAME`
+   - Works alongside Supabase uploads for dual storage
+
+3. **Testing Results** ✅ VERIFIED
+   - Deribit successfully fetches 20 perpetual contracts
+   - CSV export creates and appends correctly
+   - Total system now processes 1,034 contracts per run
+   - All exchanges maintain 100% health scores
 
 ## CRITICAL IMPROVEMENTS SUMMARY
 

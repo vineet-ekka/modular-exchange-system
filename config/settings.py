@@ -31,6 +31,7 @@ EXCHANGES = {
     "backpack": True,
     "binance": True,
     "kucoin": True,
+    "deribit": True,
     # Add new exchanges here as they become available
     # "new_exchange": True,
 }
@@ -94,6 +95,9 @@ HISTORICAL_FETCH_INTERVAL = 300
 
 # Historical table name in Supabase
 HISTORICAL_TABLE_NAME = "exchange_data_historical"
+
+# Historical CSV filename (timestamp will be appended)
+HISTORICAL_CSV_FILENAME = "historical_exchange_data"
 
 # Maximum retry attempts for failed fetches
 HISTORICAL_MAX_RETRIES = 3
