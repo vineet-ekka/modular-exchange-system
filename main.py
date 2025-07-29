@@ -80,10 +80,7 @@ class ExchangeDataSystem:
             # Step 3: Process and display data
             self._process_and_display_data()
             
-            # Step 4: Export data
-            self._export_data()
-            
-            # Step 5: Upload to database
+            # Step 4: Upload to database
             self._upload_to_database()
             
             print("\n" + "="*60)
@@ -142,18 +139,9 @@ class ExchangeDataSystem:
         if ENABLE_CONSOLE_DISPLAY:
             self.data_processor.display_table()
     
-    def _export_data(self):
-        """Export data to CSV."""
-        print("\n4. Exporting data...")
-        
-        if self.data_processor:
-            exported_file = self.data_processor.export_to_csv()
-            if exported_file:
-                print(f"OK Data exported to: {exported_file}")
-    
     def _upload_to_database(self):
         """Upload data to Supabase."""
-        print("\n5. Uploading to database...")
+        print("\n4. Uploading to database...")
         
         if self.unified_data is not None and not self.unified_data.empty:
             success = self.supabase_manager.upload_data(self.unified_data)
