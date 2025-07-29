@@ -7,6 +7,7 @@ Handles all database operations with Supabase.
 import pandas as pd
 import numpy as np
 from typing import Optional, List, Dict
+from decimal import Decimal, ROUND_HALF_UP
 from supabase import create_client, Client
 from config.settings import (
     SUPABASE_URL, SUPABASE_KEY, DATABASE_TABLE_NAME,
@@ -70,6 +71,7 @@ class SupabaseManager:
             # Convert to records
             records = df_to_upload.to_dict(orient='records')
             
+            
             # Show sample data if enabled
             if SHOW_SAMPLE_DATA and records:
                 print("Sample row to upload:", records[0])
@@ -129,6 +131,7 @@ class SupabaseManager:
         for col in df_to_upload.columns:
             if pd.api.types.is_datetime64_any_dtype(df_to_upload[col]):
                 df_to_upload[col] = df_to_upload[col].dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+        
         
         # Replace NaN, inf, -inf with None
         df_to_upload = df_to_upload.replace([np.nan, np.inf, -np.inf], None)
@@ -277,6 +280,7 @@ class SupabaseManager:
             
             # Convert to records
             records = df_to_upload.to_dict(orient='records')
+            
             
             # Show sample data if enabled
             if SHOW_SAMPLE_DATA and records:

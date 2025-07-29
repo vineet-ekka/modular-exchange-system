@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A modular cryptocurrency exchange data system that fetches perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin, Deribit), normalizes it, calculates APR, and can export to CSV or upload to Supabase database. Features both real-time data collection and continuous historical time-series storage.
+A modular cryptocurrency exchange data system that fetches perpetual futures data from multiple exchanges (Backpack, Binance, KuCoin, Deribit), normalizes it, calculates APR, and uploads to Supabase database. Features both real-time data collection and continuous historical time-series storage.
 
 ## Essential Commands
 
@@ -102,7 +102,7 @@ python example_usage.py
 2. **ExchangeFactory** → Creates and manages exchange instances based on config
 3. **Exchange implementations** → Fetch raw data from APIs (async for Binance open interest)
 4. **DataProcessor** → Normalizes data, calculates APR, validates quality
-5. **Output** → CSV export and/or Supabase batch upload (UPSERT on exchange+symbol)
+5. **Output** → Supabase batch upload (UPSERT on exchange+symbol)
 
 ### Key Design Patterns
 
@@ -461,3 +461,40 @@ Based on production testing with `--interval 30 --duration 300`:
 4. **Monitor Supabase table growth** when running long collections
 5. **Use --quiet mode** for production deployments to reduce log noise
 6. **Ensure APR column exists** in database before running uploads
+
+## Recent Changes
+
+### 2025-07-25
+
+### Kraken Funding Rate Calculation Fix
+- **Issue**: Kraken funding rates were showing extremely large APR values due to incorrect data format
+- **Root Cause**: Kraken provides funding rates that need to be divided by mark price
+- **Fix**: Modified `kraken_exchange.py` normalize_data() method to calculate: `funding_rate = raw_funding_rate / mark_price`
+- **Implementation Details**:
+  - Added validation for invalid mark prices (0, negative, or NaN)
+  - Set funding_rate to NaN when mark_price is invalid
+  - Added warning logs for contracts with invalid mark prices
+  - Import numpy for NaN handling
+- **To Revert This Change**:
+  ```python
+  # In exchanges/kraken_exchange.py, change this:
+  funding_rate = raw_funding_rate / mark_price
+  funding_rate[invalid_mask] = np.nan
+  
+  # Back to this:
+  'funding_rate': pd.to_numeric(df.get('fundingRate', 0), errors='coerce'),
+  
+  # And remove:
+  - The numpy import
+  - The mark price validation logic
+  - The invalid_mask calculation and warning
+  ```
+- **Impact**: Kraken funding rates now display correctly with reasonable APR values
+
+### Scientific Notation Display Fix
+- **Issue**: Small funding rates displayed as scientific notation (e.g., 5e-05) in Supabase
+- **Root Cause**: PostgreSQL float4 type automatically uses scientific notation for small values
+- **Solution**: Created `fix_scientific_notation.sql` to convert columns to NUMERIC type
+  - Converts `funding_rate` to NUMERIC(24,18) for 18 decimal precision
+  - Converts `apr` to NUMERIC(20,6) for large APR values
+- **Display Changes**: Updated data processor to show 18 decimal places for funding rates

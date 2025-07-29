@@ -1,6 +1,6 @@
 # Modular Exchange Data System
 
-A modular, easy-to-edit system for fetching and processing exchange data from multiple cryptocurrency exchanges (Backpack, Binance, KuCoin, and Deribit).
+A modular, easy-to-edit system for fetching and processing exchange data from multiple cryptocurrency exchanges (Backpack, Binance, KuCoin, Deribit, and Kraken).
 
 ## 🚀 New: Loop Mode for Continuous Updates!
 
@@ -35,6 +35,7 @@ modular_exchange_system/
 │   ├── binance_exchange.py  # Binance exchange module
 │   ├── kucoin_exchange.py   # KuCoin exchange module
 │   ├── deribit_exchange.py  # Deribit exchange module
+│   ├── kraken_exchange.py   # Kraken exchange module
 │   └── exchange_factory.py  # Manages all exchanges
 ├── data_processing/
 │   └── data_processor.py    # Handles data analysis and display
@@ -187,6 +188,7 @@ EXCHANGES = {
     "binance": True,    # Enable/disable Binance
     "kucoin": True,     # Enable/disable KuCoin
     "deribit": True,    # Enable/disable Deribit
+    "kraken": True,     # Enable/disable Kraken
 }
 ```
 

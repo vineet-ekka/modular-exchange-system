@@ -88,6 +88,22 @@ class DataProcessor:
         # Set APR to None for invalid data
         self.data.loc[~mask, 'apr'] = None
     
+    def _format_funding_rate(self, value):
+        """
+        Format funding rate to avoid scientific notation.
+        
+        Args:
+            value: The funding rate value
+            
+        Returns:
+            Formatted string
+        """
+        if pd.isna(value):
+            return "N/A"
+        
+        # Use 18 decimal places for all funding rates
+        return f"{value:.18f}"
+    
     def display_summary(self):
         """Display summary statistics"""
         if self.data.empty:
@@ -186,7 +202,7 @@ class DataProcessor:
         for col in ['funding_rate', 'apr', 'mark_price', 'index_price', 'open_interest']:
             if col in display_df.columns:
                 display_df[col] = display_df[col].apply(
-                    lambda x: f"{x:.6f}" if pd.notna(x) and col == 'funding_rate' 
+                    lambda x: self._format_funding_rate(x) if pd.notna(x) and col == 'funding_rate' 
                     else f"{x:.2f}%" if pd.notna(x) and col == 'apr'
                     else f"{x:.2f}" if pd.notna(x) and col in ['mark_price', 'index_price']
                     else f"{x:,.0f}" if pd.notna(x) and col == 'open_interest'
@@ -222,13 +238,45 @@ class DataProcessor:
         filename = filename if filename is not None else CSV_FILENAME
         
         try:
-            self.data.to_csv(filename, index=False)
+            # Create a copy of data for export
+            export_df = self.data.copy()
+            
+            # Format numeric columns to avoid scientific notation
+            numeric_columns = ['funding_rate', 'index_price', 'mark_price', 'open_interest', 'apr']
+            
+            for col in numeric_columns:
+                if col in export_df.columns:
+                    if col == 'funding_rate':
+                        # Format funding rate with 18 decimal places
+                        export_df[col] = export_df[col].apply(
+                            lambda x: f"{x:.18f}" if pd.notna(x) else ""
+                        )
+                    elif col in ['index_price', 'mark_price']:
+                        # Format prices with appropriate decimals
+                        export_df[col] = export_df[col].apply(
+                            lambda x: f"{x:.8f}" if pd.notna(x) and x < 0.01
+                            else f"{x:.6f}" if pd.notna(x) and x < 1
+                            else f"{x:.2f}" if pd.notna(x)
+                            else ""
+                        )
+                    elif col == 'open_interest':
+                        # Format open interest as float with 2 decimals
+                        export_df[col] = export_df[col].apply(
+                            lambda x: f"{x:.2f}" if pd.notna(x) else ""
+                        )
+                    elif col == 'apr':
+                        # Format APR with 2 decimals
+                        export_df[col] = export_df[col].apply(
+                            lambda x: f"{x:.2f}" if pd.notna(x) else ""
+                        )
+            
+            export_df.to_csv(filename, index=False)
             print(f"\nOK Data exported to: {filename}")
             return filename
         except PermissionError:
             # Try with a different filename if permission denied
             alt_filename = f"exchange_data_{int(time.time())}.csv"
-            self.data.to_csv(alt_filename, index=False)
+            export_df.to_csv(alt_filename, index=False)
             print(f"\nOK Data exported to: {alt_filename} (original filename was locked)")
             return alt_filename
         except Exception as e:

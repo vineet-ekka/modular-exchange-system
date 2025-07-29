@@ -32,6 +32,7 @@ EXCHANGES = {
     "binance": True,
     "kucoin": True,
     "deribit": True,
+    "kraken": True,
     # Add new exchanges here as they become available
     # "new_exchange": True,
 }
@@ -49,14 +50,14 @@ ENABLE_FUNDING_RATE_FETCH = True
 # DATA PROCESSING SETTINGS
 # =============================================================================
 # How many top results to show in the display table
-DISPLAY_LIMIT = 50
+DISPLAY_LIMIT = 100
 
 # Default sorting column for the display table
 # Options: 'funding_rate', 'mark_price', 'open_interest', 'exchange', 'symbol'
-DEFAULT_SORT_COLUMN = 'symbol'
+DEFAULT_SORT_COLUMN = 'exchange'
 
 # Sort order (True = ascending, False = descending)
-DEFAULT_SORT_ASCENDING = False
+DEFAULT_SORT_ASCENDING = True
 
 # =============================================================================
 # OUTPUT SETTINGS
@@ -65,7 +66,7 @@ DEFAULT_SORT_ASCENDING = False
 CSV_FILENAME = "unified_exchange_data.csv"
 
 # Enable/disable different output methods
-ENABLE_CSV_EXPORT = True
+ENABLE_CSV_EXPORT = False  # CSV export removed from main.py
 ENABLE_DATABASE_UPLOAD = True
 ENABLE_CONSOLE_DISPLAY = True
 

@@ -1,3 +1,19 @@
+### Kraken Endpoints
+
+| | Response Body Tag | Endpoint | Description |
+| --- | --- | --- | --- |
+| Contract Name | `symbol` | https://futures.kraken.com/derivatives/api/v3/tickers | Ticker data |
+| Underlying Asset | `base` | https://futures.kraken.com/derivatives/api/v3/instruments | Base asset |
+| Quote Currency | `quote` | https://futures.kraken.com/derivatives/api/v3/instruments | Quote asset |
+| Contract Type | `tag` | https://futures.kraken.com/derivatives/api/v3/tickers | Filter by tag |
+| Funding Interval | Fixed | N/A | 1 hour default |
+| Funding Rate | `fundingRate` | https://futures.kraken.com/derivatives/api/v3/tickers | **Note: Must divide by markPrice** |
+| Index Price | `indexPrice` | https://futures.kraken.com/derivatives/api/v3/tickers | Underlying index price |
+| Mark Price | `markPrice` | https://futures.kraken.com/derivatives/api/v3/tickers | Contract mark price |
+| Open Interest | `openInterest` | https://futures.kraken.com/derivatives/api/v3/tickers | Total open interest |
+
+**Important**: Kraken's `fundingRate` needs to be normalized by dividing by `markPrice` to get the actual funding rate percentage.
+
 ### Deribit Endpoints
 
 |  | Response Body Tag | Endpoint | Description |

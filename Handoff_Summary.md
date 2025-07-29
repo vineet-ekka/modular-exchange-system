@@ -5,7 +5,7 @@ A modular system for fetching and processing cryptocurrency perpetual futures da
 
 **⚠️ IMPORTANT**: When using historical collection, ALWAYS specify `--duration` parameter to avoid indefinite runs. Example: `python main_historical.py --duration 3600` for 1 hour.
 
-## Current State (As of 2025-07-24 - UPDATED)
+## Current State (As of 2025-07-25 - UPDATED)
 
 ### Working Features
 1. **Multi-Exchange Support**
@@ -13,6 +13,7 @@ A modular system for fetching and processing cryptocurrency perpetual futures da
    - KuCoin (Futures)
    - Backpack (PERP)
    - Deribit (Perpetual contracts)
+   - Kraken (Futures - with special funding rate handling)
 
 2. **Real-Time Data Collection**
    - Funding rates with APR calculation (annualized funding rates)
@@ -43,6 +44,13 @@ A modular system for fetching and processing cryptocurrency perpetual futures da
    - Console display with APR
    - CSV export
    - Supabase database upload (regular & historical)
+
+### Exchange-Specific Implementation Notes
+- **Kraken**: Requires special funding rate calculation - raw `fundingRate` must be divided by `markPrice` to get actual rate
+- **Binance**: Separate USD-M and COIN-M markets with different API endpoints
+- **KuCoin**: Uses millisecond timestamps for funding intervals
+- **Deribit**: Fixed 8-hour funding intervals, open interest in contracts (converted to USD)
+- **Backpack**: Simple REST API with straightforward data format
 
 ## MAJOR IMPROVEMENTS DELIVERED
 
@@ -539,6 +547,17 @@ Final Statistics:
 - Health monitoring: Built into every run
 
 ## CHANGELOG
+
+### 2025-07-25 - Kraken Integration and Scientific Notation Fixes
+- **Fixed**: Kraken funding rates showing extremely large APR values
+  - **Root Cause**: Kraken provides funding rates that need normalization
+  - **Solution**: Modified `kraken_exchange.py` to divide funding rate by mark price
+  - **Validation**: Added checks for invalid mark prices (0, negative, NaN)
+- **Fixed**: Scientific notation display in Supabase (e.g., 5e-05)
+  - **Solution**: Created `fix_scientific_notation.sql` to convert to NUMERIC types
+  - **Funding Rate**: Now uses NUMERIC(24,18) for 18 decimal precision
+  - **Display**: Updated to show 18 decimal places for all funding rates
+- **To Revert Kraken Fix**: See detailed instructions in CLAUDE.md
 
 ### 2025-07-22 - APR Column Database Fix
 - **Fixed**: APR column now properly uploads to Supabase
