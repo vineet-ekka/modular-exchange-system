@@ -16,9 +16,12 @@ load_dotenv()
 # =============================================================================
 # DATABASE SETTINGS
 # =============================================================================
-# Your Supabase database connection details (loaded from environment variables)
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# PostgreSQL database connection details (loaded from environment variables)
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "exchange_data")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
 
 # Database table name where data will be stored
 DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
@@ -28,11 +31,11 @@ DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
 # =============================================================================
 # Enable/disable specific exchanges (True = enabled, False = disabled)
 EXCHANGES = {
-    "backpack": True,
+    "backpack": False,
     "binance": True,
-    "kucoin": True,
-    "deribit": True,
-    "kraken": True,
+    "kucoin": False,
+    "deribit": False,
+    "kraken": False,
     # Add new exchanges here as they become available
     # "new_exchange": True,
 }
@@ -98,7 +101,7 @@ HISTORICAL_FETCH_INTERVAL = 300
 HISTORICAL_TABLE_NAME = "exchange_data_historical"
 
 # Historical CSV filename (timestamp will be appended)
-HISTORICAL_CSV_FILENAME = "historical_exchange_data"
+HISTORICAL_CSV_FILENAME = "historical-exchange-data"
 
 # Maximum retry attempts for failed fetches
 HISTORICAL_MAX_RETRIES = 3
@@ -109,4 +112,4 @@ HISTORICAL_BASE_BACKOFF = 60
 # =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
-# Validation is now done in main.py when the system starts
+# Validation is now done in exchange-data-collector.py when the system starts

@@ -2,16 +2,19 @@
 Binance Exchange Module
 ======================
 Handles data fetching and normalization for Binance exchange (USD-M and COIN-M).
+Includes historical funding rate retrieval capabilities.
 """
 
 import pandas as pd
 import time
 import asyncio
 import aiohttp
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
+from datetime import datetime, timedelta, timezone
 from .base_exchange import BaseExchange
 from config.settings import ENABLE_OPEN_INTEREST_FETCH
 from utils.rate_limiter import rate_limiter
+from utils.logger import setup_logger
 
 
 class BinanceExchange(BaseExchange):
@@ -22,6 +25,7 @@ class BinanceExchange(BaseExchange):
     
     def __init__(self, enabled: bool = True):
         super().__init__("Binance", enabled)
+        self.logger = setup_logger("BinanceExchange")
     
     def fetch_data(self) -> pd.DataFrame:
         """
@@ -274,4 +278,237 @@ class BinanceExchange(BaseExchange):
             'market_type': ['Binance ' + mt if mt else 'Binance' for mt in df['binance_market_type']] if 'binance_market_type' in df.columns else 'Binance',
         })
         
-        return normalized 
+        return normalized
+    
+    # ==================== HISTORICAL FUNDING RATE METHODS ====================
+    
+    def fetch_historical_funding_rates(self, symbol: str, market_type: str = 'USD-M', 
+                                      start_time: Optional[datetime] = None, 
+                                      end_time: Optional[datetime] = None) -> pd.DataFrame:
+        """
+        Fetch historical funding rates for a specific symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTCUSDT')
+            market_type: Either 'USD-M' or 'COIN-M'
+            start_time: Start time for historical data (default: 30 days ago)
+            end_time: End time for historical data (default: now)
+            
+        Returns:
+            DataFrame with historical funding rates
+        """
+        # Set default time range if not provided
+        if end_time is None:
+            end_time = datetime.now(timezone.utc)
+        if start_time is None:
+            start_time = end_time - timedelta(days=30)
+        
+        # Convert to milliseconds timestamp
+        start_ms = int(start_time.timestamp() * 1000)
+        end_ms = int(end_time.timestamp() * 1000)
+        
+        # Determine API endpoint based on market type
+        if market_type == 'USD-M':
+            base_url = 'https://fapi.binance.com/fapi/v1/'
+        else:  # COIN-M
+            base_url = 'https://dapi.binance.com/dapi/v1/'
+        
+        url = base_url + 'fundingRate'
+        
+        all_rates = []
+        current_start = start_ms
+        
+        # Fetch in batches (max 1000 records per request)
+        while current_start < end_ms:
+            params = {
+                'symbol': symbol,
+                'startTime': current_start,
+                'endTime': end_ms,
+                'limit': 1000
+            }
+            
+            # Rate limited request
+            data = self.safe_request(url, params=params)
+            
+            if not data:
+                self.logger.warning(f"Failed to fetch historical rates for {symbol}")
+                break
+            
+            if len(data) == 0:
+                # No more data available
+                break
+            
+            all_rates.extend(data)
+            
+            # If we got less than 1000 records, we've reached the end
+            if len(data) < 1000:
+                break
+            
+            # Update start time for next batch (last funding time + 1ms)
+            last_time = data[-1]['fundingTime']
+            current_start = last_time + 1
+        
+        if not all_rates:
+            return pd.DataFrame()
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(all_rates)
+        
+        # Convert timestamps
+        df['fundingTime'] = pd.to_datetime(df['fundingTime'], unit='ms')
+        df['symbol'] = symbol
+        df['exchange'] = 'Binance'
+        df['market_type'] = market_type
+        
+        # Rename columns to match our schema
+        df = df.rename(columns={
+            'fundingTime': 'funding_time',
+            'fundingRate': 'funding_rate',
+            'markPrice': 'mark_price'
+        })
+        
+        # Auto-detect funding interval
+        if len(df) > 1:
+            df['funding_interval_hours'] = self._detect_funding_interval(df['funding_time'])
+        else:
+            # Default to 8 hours if we can't detect
+            df['funding_interval_hours'] = 8
+        
+        return df
+    
+    def _detect_funding_interval(self, funding_times: pd.Series) -> int:
+        """
+        Auto-detect funding interval from timestamps.
+        
+        Args:
+            funding_times: Series of funding timestamps
+            
+        Returns:
+            Detected interval in hours (4 or 8)
+        """
+        if len(funding_times) < 2:
+            return 8  # Default to 8 hours
+        
+        # Calculate time differences
+        time_diffs = funding_times.diff().dropna()
+        
+        # Get the most common interval in hours
+        hours_diffs = time_diffs.dt.total_seconds() / 3600
+        
+        # Round to nearest hour and get mode
+        rounded_hours = hours_diffs.round()
+        most_common = rounded_hours.mode()
+        
+        if len(most_common) > 0:
+            interval = int(most_common.iloc[0])
+            # Binance uses either 4-hour or 8-hour intervals
+            if interval <= 5:
+                return 4
+            else:
+                return 8
+        
+        return 8  # Default to 8 hours
+    
+    def fetch_all_perpetuals_historical(self, days: int = 30, 
+                                       batch_size: int = 10) -> pd.DataFrame:
+        """
+        Fetch historical funding rates for all perpetual contracts.
+        
+        Args:
+            days: Number of days of historical data to fetch
+            batch_size: Number of symbols to fetch concurrently
+            
+        Returns:
+            Combined DataFrame with all historical funding rates
+        """
+        self.logger.info(f"Starting historical data fetch for all Binance perpetuals ({days} days)")
+        
+        # Get list of all perpetual contracts
+        perpetuals_usdm = self._get_perpetual_symbols('USD-M')
+        perpetuals_coinm = self._get_perpetual_symbols('COIN-M')
+        
+        all_historical_data = []
+        
+        # Calculate time range
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+        
+        # Process USD-M perpetuals
+        self.logger.info(f"Fetching historical data for {len(perpetuals_usdm)} USD-M perpetuals")
+        for i in range(0, len(perpetuals_usdm), batch_size):
+            batch = perpetuals_usdm[i:i+batch_size]
+            
+            for symbol in batch:
+                try:
+                    df = self.fetch_historical_funding_rates(
+                        symbol, 'USD-M', start_time, end_time
+                    )
+                    if not df.empty:
+                        all_historical_data.append(df)
+                        self.logger.debug(f"Fetched {len(df)} records for {symbol}")
+                except Exception as e:
+                    self.logger.error(f"Error fetching {symbol}: {e}")
+                
+                # Small delay to respect rate limits
+                time.sleep(0.2)
+        
+        # Process COIN-M perpetuals
+        self.logger.info(f"Fetching historical data for {len(perpetuals_coinm)} COIN-M perpetuals")
+        for i in range(0, len(perpetuals_coinm), batch_size):
+            batch = perpetuals_coinm[i:i+batch_size]
+            
+            for symbol in batch:
+                try:
+                    df = self.fetch_historical_funding_rates(
+                        symbol, 'COIN-M', start_time, end_time
+                    )
+                    if not df.empty:
+                        all_historical_data.append(df)
+                        self.logger.debug(f"Fetched {len(df)} records for {symbol}")
+                except Exception as e:
+                    self.logger.error(f"Error fetching {symbol}: {e}")
+                
+                # Small delay to respect rate limits
+                time.sleep(0.2)
+        
+        # Combine all data
+        if all_historical_data:
+            combined_df = pd.concat(all_historical_data, ignore_index=True)
+            self.logger.info(f"Completed: fetched {len(combined_df)} total historical records")
+            return combined_df
+        else:
+            self.logger.warning("No historical data fetched")
+            return pd.DataFrame()
+    
+    def _get_perpetual_symbols(self, market_type: str) -> List[str]:
+        """
+        Get list of all perpetual contract symbols.
+        
+        Args:
+            market_type: Either 'USD-M' or 'COIN-M'
+            
+        Returns:
+            List of perpetual contract symbols
+        """
+        if market_type == 'USD-M':
+            base_url = 'https://fapi.binance.com/fapi/v1/'
+        else:  # COIN-M
+            base_url = 'https://dapi.binance.com/dapi/v1/'
+        
+        # Fetch exchange info
+        exchange_info = self.safe_request(base_url + 'exchangeInfo')
+        
+        if not exchange_info or 'symbols' not in exchange_info:
+            return []
+        
+        # Filter for perpetual contracts that are trading
+        perpetuals = []
+        for symbol_info in exchange_info['symbols']:
+            if symbol_info.get('contractType') == 'PERPETUAL':
+                # Check if actively trading
+                status_field = 'status' if market_type == 'USD-M' else 'contractStatus'
+                if symbol_info.get(status_field) == 'TRADING':
+                    perpetuals.append(symbol_info['symbol'])
+        
+        self.logger.info(f"Found {len(perpetuals)} active {market_type} perpetual contracts")
+        return perpetuals 

@@ -71,10 +71,14 @@ class ConfigValidator:
     def _validate_database_config(self, config) -> None:
         """Validate database config if database upload is enabled."""
         if getattr(config, 'ENABLE_DATABASE_UPLOAD', False):
-            if not getattr(config, 'SUPABASE_URL', None):
-                self.errors.append("SUPABASE_URL required when ENABLE_DATABASE_UPLOAD is True")
-            if not getattr(config, 'SUPABASE_KEY', None):
-                self.errors.append("SUPABASE_KEY required when ENABLE_DATABASE_UPLOAD is True")
+            if not getattr(config, 'POSTGRES_HOST', None):
+                self.errors.append("POSTGRES_HOST required when ENABLE_DATABASE_UPLOAD is True")
+            if not getattr(config, 'POSTGRES_DATABASE', None):
+                self.errors.append("POSTGRES_DATABASE required when ENABLE_DATABASE_UPLOAD is True")
+            if not getattr(config, 'POSTGRES_USER', None):
+                self.errors.append("POSTGRES_USER required when ENABLE_DATABASE_UPLOAD is True")
+            if not getattr(config, 'POSTGRES_PASSWORD', None):
+                self.errors.append("POSTGRES_PASSWORD required when ENABLE_DATABASE_UPLOAD is True")
     
     def get_validation_report(self) -> str:
         """Get formatted validation report."""

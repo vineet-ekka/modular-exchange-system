@@ -71,8 +71,12 @@ Thumbs.db
 
 # Project specific
 unified_exchange_data.csv
+historical-exchange-data.csv
 *.csv
 !example_data.csv
+nul
+test_*.html
+*_test.html
 
 # Logs
 logs/
@@ -97,3 +101,23 @@ settings.local.py
 *.bak
 *.backup
 *_backup.py
+
+# Frontend dependencies and build artifacts
+node_modules/
+.next/
+.nuxt/
+dist/
+out/
+build/
+
+# Frontend environment and config
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Frontend cache and temp files
+.cache/
+.parcel-cache/
+.vite/
+*.tsbuildinfo

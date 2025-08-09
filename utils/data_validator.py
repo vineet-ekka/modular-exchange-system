@@ -80,7 +80,7 @@ class DataValidator:
             return
             
         present_exchanges = set(df['exchange'].unique())
-        critical_exchanges = {'Binance', 'Backpack'}  # Your most important ones
+        critical_exchanges = {'Binance'}  # Only require enabled exchanges
         
         missing_critical = critical_exchanges - present_exchanges
         if missing_critical:

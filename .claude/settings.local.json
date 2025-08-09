@@ -2,7 +2,22 @@
   "permissions": {
     "allow": [
       "Bash(rm:*)",
-      "WebFetch(domain:docs.basis.markets)"
+      "WebFetch(domain:docs.basis.markets)",
+      "Bash(npm run format:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm run build:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:docs.kraken.com)",
+      "WebFetch(domain:futures.kraken.com)",
+      "Bash(mv:*)",
+      "Bash(npm start)",
+      "Bash(curl:*)",
+      "Bash(powershell:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

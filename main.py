@@ -1,8 +1,8 @@
 """
-Main Exchange Data System
-========================
-This is the main entry point for the modular exchange data system.
-Non-coders can easily modify settings in config/settings.py without touching this code.
+Exchange Data Collector
+=======================
+Real-time funding rate collection from cryptocurrency exchanges.
+Configuration can be modified in config/settings.py without touching this code.
 """
 
 import time
@@ -22,7 +22,7 @@ from config.settings import (
 from config.validator import validate_and_exit_on_error
 from exchanges.exchange_factory import ExchangeFactory
 from data_processing.data_processor import DataProcessor
-from database.supabase_manager import SupabaseManager
+from database.postgres_manager import PostgresManager
 from utils.logger import setup_logger, log_execution_time
 from utils.health_tracker import get_health_report
 from utils.health_check import print_health_status
@@ -44,7 +44,7 @@ class ExchangeDataSystem:
         
         self.logger = setup_logger("main")
         self.exchange_factory = ExchangeFactory(EXCHANGES)
-        self.supabase_manager = SupabaseManager()
+        self.db_manager = PostgresManager()
         self.data_processor = None
         self.unified_data = None
         
@@ -100,7 +100,7 @@ class ExchangeDataSystem:
     def _test_database_connection(self):
         """Test the database connection."""
         print("\n1. Testing database connection...")
-        if not self.supabase_manager.test_connection():
+        if not self.db_manager.test_connection():
             print("! Database connection failed, but continuing...")
         else:
             print("OK Database connection successful")
@@ -144,7 +144,7 @@ class ExchangeDataSystem:
         print("\n4. Uploading to database...")
         
         if self.unified_data is not None and not self.unified_data.empty:
-            success = self.supabase_manager.upload_data(self.unified_data)
+            success = self.db_manager.upload_data(self.unified_data)
             if success:
                 print("OK Data uploaded to database successfully")
             else:
