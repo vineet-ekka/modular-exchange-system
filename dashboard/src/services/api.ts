@@ -190,6 +190,37 @@ export const fetchFundingSparkline = async (
   }
 };
 
+// Phase 6 API - Current Funding
+export interface CurrentFundingData {
+  asset: string;
+  symbol: string;
+  exchange: string;
+  funding_rate: number;
+  apr: number;
+  funding_interval_hours: number;
+  next_funding_time: string;
+  time_until_funding: {
+    hours: number;
+    minutes: number;
+    seconds: number;
+    display: string;
+  };
+  last_updated: string;
+  error?: string;
+}
+
+export const fetchCurrentFunding = async (
+  asset: string
+): Promise<CurrentFundingData | null> => {
+  try {
+    const response = await api.get(`/api/current-funding/${asset}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching current funding:', error);
+    return null;
+  }
+};
+
 // Asset Grid API
 export interface AssetGridData {
   asset: string;
@@ -203,6 +234,23 @@ export interface AssetGridResponse {
   data: AssetGridData[];
   total_assets: number;
   timestamp: string;
+}
+
+// Contract Details Interface for expanded view
+export interface ContractDetails {
+  symbol: string;           // Contract Name
+  exchange: string;         // Exchange Name
+  base_asset: string;       // Base Asset
+  quote_asset: string;      // Quote Asset
+  funding_rate: number;     // Funding Rate
+  apr: number;             // APR
+  open_interest: number;    // Open Interest
+  mark_price: number;       // Mark Price
+  index_price: number;      // Index Price
+  funding_interval_hours: number;
+  contract_type: string;
+  market_type: string;
+  last_updated: string;
 }
 
 export const fetchFundingRatesGrid = async (): Promise<AssetGridResponse | null> => {
@@ -237,5 +285,28 @@ export const fetchHistoricalFundingByAsset = async (
   } catch (error) {
     console.error('Error fetching historical funding by asset:', error);
     return null;
+  }
+};
+
+// Fetch contracts by asset for expanded view
+export const fetchContractsByAsset = async (asset: string): Promise<ContractDetails[]> => {
+  try {
+    console.log(`API: Fetching contracts for asset: ${asset}`);
+    const response = await api.get(`/api/funding-rates?base_asset=${asset}&limit=100`);
+    console.log(`API: Response for ${asset}:`, response.data);
+    
+    // Ensure we return an array
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else if (response.data && response.data.data) {
+      // Handle if API returns wrapped response
+      return response.data.data;
+    } else {
+      console.warn(`API: Unexpected response format for ${asset}:`, response.data);
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching contracts for asset:', error);
+    return [];
   }
 };

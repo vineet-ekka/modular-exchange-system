@@ -141,10 +141,69 @@ class BinanceExchange(BaseExchange):
         # Add market type
         merged_df['binance_market_type'] = market_type
         
-        # Set funding interval (8 hours is standard for Binance)
-        merged_df['fundingIntervalHours'] = 8
+        # Fetch and apply correct funding intervals
+        merged_df = self._apply_funding_intervals(merged_df, market_type)
         
         return merged_df
+    
+    def _fetch_funding_intervals(self, market_type: str) -> dict:
+        """
+        Fetch funding interval information from Binance API.
+        
+        Args:
+            market_type: Either 'USD-M' or 'COIN-M'
+            
+        Returns:
+            Dictionary mapping symbol to funding_interval_hours
+        """
+        if market_type == 'USD-M':
+            url = 'https://fapi.binance.com/fapi/v1/fundingInfo'
+        else:  # COIN-M
+            url = 'https://dapi.binance.com/dapi/v1/fundingInfo'
+        
+        # Fetch funding info
+        funding_info = self.safe_request(url)
+        
+        # Create mapping of symbol to funding interval
+        interval_map = {}
+        if funding_info and isinstance(funding_info, list):
+            for item in funding_info:
+                if 'symbol' in item and 'fundingIntervalHours' in item:
+                    interval_map[item['symbol']] = item['fundingIntervalHours']
+        
+        return interval_map
+    
+    def _apply_funding_intervals(self, df: pd.DataFrame, market_type: str) -> pd.DataFrame:
+        """
+        Apply correct funding intervals to the DataFrame.
+        
+        Args:
+            df: DataFrame with exchange data
+            market_type: Either 'USD-M' or 'COIN-M'
+            
+        Returns:
+            DataFrame with correct funding intervals
+        """
+        # Fetch funding intervals from API
+        interval_map = self._fetch_funding_intervals(market_type)
+        
+        # Apply intervals to DataFrame
+        def get_interval(symbol):
+            # Check if symbol has custom interval in the API response
+            if symbol in interval_map:
+                return interval_map[symbol]
+            # Default: 8 hours for all contracts not in fundingInfo endpoint
+            # (COIN-M contracts and some USD-M contracts use default)
+            return 8
+        
+        df['fundingIntervalHours'] = df['symbol'].apply(get_interval)
+        
+        # Log the distribution
+        interval_counts = df['fundingIntervalHours'].value_counts()
+        for interval, count in interval_counts.items():
+            print(f"  {market_type}: {count} contracts with {interval}-hour intervals")
+        
+        return df
     
     def _fetch_open_interest_bulk(self, base_url: str, symbols: List[str]) -> List[Dict]:
         """
@@ -264,10 +323,41 @@ class BinanceExchange(BaseExchange):
         if df.empty:
             return pd.DataFrame(columns=self.get_unified_columns())
         
+        # Add helper function before normalize_data method
+        def extract_clean_base_asset(symbol, original_base_asset):
+            """
+            Extract the actual base asset without multiplier prefixes.
+            
+            Examples:
+            - 1000SHIBUSDT -> SHIB
+            - 1000000MOGUSDT -> MOG
+            - BTCUSDT -> BTC (unchanged)
+            """
+            if symbol.startswith('1000000'):
+                # Remove the 1000000 prefix and any quote currency suffix
+                clean = symbol[7:]  # Remove '1000000'
+                # Remove common quote currencies
+                for suffix in ['USDT', 'USDC', 'BUSD', 'USD']:
+                    if clean.endswith(suffix):
+                        return clean[:-len(suffix)]
+                return clean
+            elif symbol.startswith('1000'):
+                # Remove the 1000 prefix and any quote currency suffix
+                clean = symbol[4:]  # Remove '1000'
+                # Remove common quote currencies
+                for suffix in ['USDT', 'USDC', 'BUSD', 'USD']:
+                    if clean.endswith(suffix):
+                        return clean[:-len(suffix)]
+                return clean
+            else:
+                # Return the original base asset for normal symbols
+                return original_base_asset
+        
+        # Update normalize_data method
         normalized = pd.DataFrame({
             'exchange': 'Binance',
             'symbol': df['symbol'],
-            'base_asset': df['baseAsset'],
+            'base_asset': df.apply(lambda row: extract_clean_base_asset(row['symbol'], row['baseAsset']), axis=1),
             'quote_asset': df['quoteAsset'],
             'funding_rate': pd.to_numeric(df['lastFundingRate'], errors='coerce'),
             'funding_interval_hours': pd.to_numeric(df['fundingIntervalHours'], errors='coerce'),
@@ -360,6 +450,9 @@ class BinanceExchange(BaseExchange):
         df['exchange'] = 'Binance'
         df['market_type'] = market_type
         
+        # Extract base_asset from symbol
+        df['base_asset'] = self._extract_base_asset(symbol, market_type)
+        
         # Rename columns to match our schema
         df = df.rename(columns={
             'fundingTime': 'funding_time',
@@ -375,6 +468,52 @@ class BinanceExchange(BaseExchange):
             df['funding_interval_hours'] = 8
         
         return df
+    
+    def _extract_base_asset(self, symbol: str, market_type: str) -> str:
+        """
+        Extract base asset from symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTCUSDT', 'BTCUSD_PERP')
+            market_type: Either 'USD-M' or 'COIN-M'
+            
+        Returns:
+            Base asset (e.g., 'BTC')
+        """
+        if market_type == 'COIN-M':
+            # COIN-M symbols like BTCUSD_PERP -> BTC
+            if '_' in symbol:
+                # Remove the _PERP or _YYMMDD suffix
+                base_part = symbol.split('_')[0]
+                # Remove USD from the end to get base asset
+                if base_part.endswith('USD'):
+                    return base_part[:-3]
+            return symbol  # Fallback
+        else:
+            # USD-M symbols like BTCUSDT -> BTC
+            # Handle 1000000 prefix first
+            if symbol.startswith('1000000'):
+                # Remove the 1000000 prefix and any quote currency suffix
+                clean = symbol[7:]  # Remove '1000000'
+                # Remove common quote currencies
+                for quote in ['USDT', 'USDC', 'BUSD', 'TUSD']:
+                    if clean.endswith(quote):
+                        return clean[:-len(quote)]
+                return clean
+            elif symbol.startswith('1000'):
+                # Remove the 1000 prefix and any quote currency suffix
+                clean = symbol[4:]  # Remove '1000'
+                # Remove common quote currencies
+                for quote in ['USDT', 'USDC', 'BUSD', 'TUSD']:
+                    if clean.endswith(quote):
+                        return clean[:-len(quote)]
+                return clean
+            else:
+                # Remove common quote currencies for normal symbols
+                for quote in ['USDT', 'USDC', 'BUSD', 'TUSD']:
+                    if symbol.endswith(quote):
+                        return symbol[:-len(quote)]
+            return symbol  # Fallback
     
     def _detect_funding_interval(self, funding_times: pd.Series) -> int:
         """
@@ -410,18 +549,37 @@ class BinanceExchange(BaseExchange):
         return 8  # Default to 8 hours
     
     def fetch_all_perpetuals_historical(self, days: int = 30, 
-                                       batch_size: int = 10) -> pd.DataFrame:
+                                       batch_size: int = 10,
+                                       progress_callback=None,
+                                       start_time: Optional[datetime] = None,
+                                       end_time: Optional[datetime] = None) -> pd.DataFrame:
         """
         Fetch historical funding rates for all perpetual contracts.
         
         Args:
             days: Number of days of historical data to fetch
             batch_size: Number of symbols to fetch concurrently
+            progress_callback: Callback for progress updates
+            start_time: Optional start time (overrides days calculation)
+            end_time: Optional end time (defaults to now)
             
         Returns:
             Combined DataFrame with all historical funding rates
         """
-        self.logger.info(f"Starting historical data fetch for all Binance perpetuals ({days} days)")
+        # Calculate time range - use provided times or calculate from days
+        if end_time is None:
+            end_time = datetime.now(timezone.utc)
+        if start_time is None:
+            start_time = end_time - timedelta(days=days)
+        
+        # Log the date range being used
+        actual_days = (end_time - start_time).days
+        print(f"\n{'='*60}")
+        print(f"BINANCE: Starting historical data fetch")
+        print(f"Date range: {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')} ({actual_days} days)")
+        print(f"{'='*60}")
+        self.logger.info(f"Starting historical data fetch for all Binance perpetuals")
+        self.logger.info(f"  Date range: {start_time.isoformat()} to {end_time.isoformat()} ({actual_days} days)")
         
         # Get list of all perpetual contracts
         perpetuals_usdm = self._get_perpetual_symbols('USD-M')
@@ -429,11 +587,12 @@ class BinanceExchange(BaseExchange):
         
         all_historical_data = []
         
-        # Calculate time range
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=days)
+        # Calculate total symbols for progress tracking
+        total_symbols = len(perpetuals_usdm) + len(perpetuals_coinm)
+        symbols_processed = 0
         
         # Process USD-M perpetuals
+        print(f"BINANCE: Found {len(perpetuals_usdm)} USD-M perpetual contracts to process")
         self.logger.info(f"Fetching historical data for {len(perpetuals_usdm)} USD-M perpetuals")
         for i in range(0, len(perpetuals_usdm), batch_size):
             batch = perpetuals_usdm[i:i+batch_size]
@@ -449,10 +608,21 @@ class BinanceExchange(BaseExchange):
                 except Exception as e:
                     self.logger.error(f"Error fetching {symbol}: {e}")
                 
+                # Update progress
+                symbols_processed += 1
+                if progress_callback:
+                    progress = (symbols_processed / total_symbols) * 100
+                    progress_callback(symbols_processed, total_symbols, progress, f"Processing {symbol}")
+                
+                # Print progress every 50 symbols
+                if symbols_processed % 50 == 0:
+                    print(f"BINANCE: Progress - {symbols_processed}/{total_symbols} contracts ({progress:.1f}%)")
+                
                 # Small delay to respect rate limits
                 time.sleep(0.2)
         
         # Process COIN-M perpetuals
+        print(f"BINANCE: Found {len(perpetuals_coinm)} COIN-M perpetual contracts to process")
         self.logger.info(f"Fetching historical data for {len(perpetuals_coinm)} COIN-M perpetuals")
         for i in range(0, len(perpetuals_coinm), batch_size):
             batch = perpetuals_coinm[i:i+batch_size]
@@ -468,15 +638,28 @@ class BinanceExchange(BaseExchange):
                 except Exception as e:
                     self.logger.error(f"Error fetching {symbol}: {e}")
                 
+                # Update progress
+                symbols_processed += 1
+                if progress_callback:
+                    progress = (symbols_processed / total_symbols) * 100
+                    progress_callback(symbols_processed, total_symbols, progress, f"Processing {symbol}")
+                
+                # Print progress every 50 symbols
+                if symbols_processed % 50 == 0:
+                    print(f"BINANCE: Progress - {symbols_processed}/{total_symbols} contracts ({progress:.1f}%)")
+                
                 # Small delay to respect rate limits
                 time.sleep(0.2)
         
         # Combine all data
         if all_historical_data:
             combined_df = pd.concat(all_historical_data, ignore_index=True)
+            print(f"BINANCE: Completed! Fetched {len(combined_df)} total historical records")
+            print(f"BINANCE: {len(perpetuals_usdm)} USD-M + {len(perpetuals_coinm)} COIN-M = {total_symbols} total contracts")
             self.logger.info(f"Completed: fetched {len(combined_df)} total historical records")
             return combined_df
         else:
+            print(f"BINANCE: WARNING - No historical data was fetched")
             self.logger.warning("No historical data fetched")
             return pd.DataFrame()
     

@@ -17,7 +17,24 @@
       "Bash(npm start)",
       "Bash(curl:*)",
       "Bash(powershell:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm install:*)",
+      "Bash(mkdir:*)",
+      "Bash(start http://localhost:3000)",
+      "Bash(start \"Docker Desktop\" \"C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe\")",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c:*)",
+      "Bash(start cmd /c:*)",
+      "Bash(timeout:*)",
+      "Bash(start http://localhost:3000/historical/BTC)",
+      "Bash(psql:*)",
+      "Bash(cp:*)",
+      "WebFetch(domain:www.kucoin.com)",
+      "WebFetch(domain:hyperliquid.gitbook.io)",
+      "WebFetch(domain:github.com)",
+      "Bash(start debug_dashboard.html)",
+      "Bash(dir:*)",
+      "Bash(start:*)"
     ],
     "deny": []
   }

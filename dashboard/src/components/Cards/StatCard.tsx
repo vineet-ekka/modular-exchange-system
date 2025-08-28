@@ -18,35 +18,26 @@ const StatCard: React.FC<StatCardProps> = ({
   icon, 
   color = 'blue' 
 }) => {
-  const colorClasses = {
-    blue: 'from-blue-600 to-blue-700',
-    green: 'from-green-600 to-green-700',
-    purple: 'from-purple-600 to-purple-700',
-    indigo: 'from-indigo-600 to-indigo-700',
-  };
-
+  // Using simpler card style matching the reference image
   return (
-    <div className={clsx(
-      'bg-gradient-to-r rounded-xl p-6 text-white shadow-xl',
-      colorClasses[color]
-    )}>
+    <div className="bg-white rounded-xl p-6 shadow-lg border border-light-border">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-white/80 text-sm font-medium">{title}</p>
-          <p className="text-3xl font-bold mt-2">{value || '—'}</p>
+          <p className="text-text-secondary text-sm font-medium">{title}</p>
+          <p className="text-3xl font-bold mt-2 text-text-primary">{value || '—'}</p>
           {subtitle && (
-            <p className="text-white/60 text-xs mt-1">{subtitle}</p>
+            <p className="text-text-muted text-xs mt-1">{subtitle}</p>
           )}
           {change !== undefined && (
             <p className={clsx(
               'text-sm mt-2',
-              change > 0 ? 'text-green-300' : 'text-red-300'
+              change > 0 ? 'text-funding-positive' : 'text-funding-negative'
             )}>
               {change > 0 ? '↑' : '↓'} {Math.abs(change)}%
             </p>
           )}
         </div>
-        <div className="text-4xl opacity-50">{icon}</div>
+        {icon && <div className="text-4xl opacity-30 text-text-muted">{icon}</div>}
       </div>
     </div>
   );

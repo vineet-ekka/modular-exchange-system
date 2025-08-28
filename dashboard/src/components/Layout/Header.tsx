@@ -1,34 +1,46 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import ShutdownHeaderButton from '../ShutdownHeaderButton';
 
 interface HeaderProps {
   lastUpdate?: Date;
 }
 
 const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isSettingsPage = location.pathname === '/settings';
+
   return (
-    <header className="bg-gray-900 border-b border-gray-800 shadow-lg">
+    <header className="bg-white border-b border-light-border shadow-md">
       <div className="px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <h1 className="text-2xl font-bold text-white">
-              Exchange Funding Rates Dashboard
+            <h1 className="text-2xl font-bold text-text-primary">
+              Futures Dashboard
             </h1>
-            <span className="px-3 py-1 text-xs rounded-full bg-green-500/20 text-green-400 animate-pulse">
-              LIVE
+            <span className="px-3 py-1 text-xs rounded-full bg-accent-green/10 text-accent-green border border-accent-green/20 animate-pulse">
+              Live Data
             </span>
           </div>
           <div className="flex items-center space-x-4">
             {lastUpdate && (
-              <div className="text-sm text-gray-400">
+              <div className="text-sm text-text-secondary">
                 Last Update: {lastUpdate.toLocaleTimeString()}
               </div>
             )}
-            <button 
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Refresh
-            </button>
+            {!isSettingsPage && (
+              <button
+                onClick={() => navigate('/settings')}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-sm flex items-center space-x-2"
+              >
+                <span>⚙️</span>
+                <span>Settings</span>
+              </button>
+            )}
+            <ShutdownHeaderButton 
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg transition-colors shadow-sm"
+            />
           </div>
         </div>
       </div>

@@ -31,12 +31,12 @@ DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
 # =============================================================================
 # Enable/disable specific exchanges (True = enabled, False = disabled)
 EXCHANGES = {
-    'backpack': True,     # Enabled - 43 perpetual contracts
-    'binance': True,      # Enabled - 547 perpetual contracts
-    'kucoin': True,       # Enabled - 477 perpetual contracts
-    'hyperliquid': True,  # Enabled - 171 perpetual contracts
-    'deribit': False,     # Ready but disabled
-    'kraken': False       # Ready but disabled
+    'backpack': True,     # Enabled - 39 perpetual contracts
+    'binance': True,      # Enabled - 541 perpetual contracts
+    'kucoin': True,       # Enabled - 472 perpetual contracts
+    'hyperliquid': True,  # Enabled - 170 perpetual contracts (1-hour funding)
+    'deribit': False,
+    'kraken': False
 }
 
 # =============================================================================

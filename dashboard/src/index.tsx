@@ -4,14 +4,20 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
-root.render(
-  <React.StrictMode>
+console.log('Index.tsx is loading');
+
+const rootElement = document.getElementById('root');
+console.log('Root element:', rootElement);
+
+if (rootElement) {
+  const root = ReactDOM.createRoot(rootElement as HTMLElement);
+  console.log('Rendering App component');
+  root.render(
     <App />
-  </React.StrictMode>
-);
+  );
+} else {
+  console.error('Could not find root element');
+}
 
 // If you want to start measuring performance in your app, pass a function
 // to log results (for example: reportWebVitals(console.log))

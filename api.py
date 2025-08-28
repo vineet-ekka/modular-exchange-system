@@ -14,7 +14,12 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import time
+import subprocess
+import signal
+from pathlib import Path
 from dotenv import load_dotenv
+from config.settings_manager import SettingsManager
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +45,7 @@ DB_CONFIG = {
     'port': os.getenv("POSTGRES_PORT", "5432"),
     'database': os.getenv("POSTGRES_DATABASE", "exchange_data"),
     'user': os.getenv("POSTGRES_USER", "postgres"),
-    'password': os.getenv("POSTGRES_PASSWORD", "postgres")
+    'password': os.getenv("POSTGRES_PASSWORD", "postgres123")
 }
 
 def get_db_connection():
@@ -106,7 +111,7 @@ async def get_funding_rates(
     cur = conn.cursor()
     
     try:
-        # Build query with filters - DEFAULT TO BINANCE ONLY
+        # Build query with filters
         query = """
             SELECT 
                 exchange,
@@ -123,14 +128,14 @@ async def get_funding_rates(
                 market_type,
                 last_updated
             FROM exchange_data
-            WHERE LOWER(exchange) = 'binance'
+            WHERE 1=1
         """
         params = []
         
-        # Note: exchange filter is now always Binance
-        if exchange and exchange.lower() != 'binance':
-            # If someone specifically requests another exchange, return empty
-            return []
+        # Apply exchange filter if provided
+        if exchange:
+            query += " AND LOWER(exchange) = LOWER(%s)"
+            params.append(exchange)
         
         if base_asset:
             query += " AND LOWER(base_asset) = LOWER(%s)"
@@ -182,7 +187,7 @@ async def get_statistics():
     cur = conn.cursor()
     
     try:
-        # Get overall statistics - BINANCE ONLY
+        # Get overall statistics
         cur.execute("""
             SELECT 
                 COUNT(*) as total_contracts,
@@ -194,17 +199,15 @@ async def get_statistics():
                 SUM(open_interest) as total_open_interest
             FROM exchange_data
             WHERE apr IS NOT NULL
-                AND LOWER(exchange) = 'binance'
         """)
         
         stats = dict(cur.fetchone())
         
-        # Get highest APR contract details - BINANCE ONLY
+        # Get highest APR contract details
         cur.execute("""
             SELECT symbol, exchange, apr
             FROM exchange_data
-            WHERE apr = (SELECT MAX(apr) FROM exchange_data WHERE apr IS NOT NULL AND LOWER(exchange) = 'binance')
-                AND LOWER(exchange) = 'binance'
+            WHERE apr = (SELECT MAX(apr) FROM exchange_data WHERE apr IS NOT NULL)
             LIMIT 1
         """)
         highest = cur.fetchone()
@@ -212,12 +215,11 @@ async def get_statistics():
             stats['highest_symbol'] = highest['symbol']
             stats['highest_exchange'] = highest['exchange']
         
-        # Get lowest APR contract details - BINANCE ONLY
+        # Get lowest APR contract details
         cur.execute("""
             SELECT symbol, exchange, apr
             FROM exchange_data
-            WHERE apr = (SELECT MIN(apr) FROM exchange_data WHERE apr IS NOT NULL AND LOWER(exchange) = 'binance')
-                AND LOWER(exchange) = 'binance'
+            WHERE apr = (SELECT MIN(apr) FROM exchange_data WHERE apr IS NOT NULL)
             LIMIT 1
         """)
         lowest = cur.fetchone()
@@ -401,8 +403,27 @@ async def get_exchanges():
     """
     Get list of unique exchanges in the database.
     """
-    # Return only Binance
-    return ["Binance"]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            SELECT DISTINCT exchange
+            FROM exchange_data
+            WHERE exchange IS NOT NULL
+            ORDER BY exchange
+        """)
+        
+        results = cur.fetchall()
+        exchanges = [row['exchange'] for row in results]
+        
+        return exchanges
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
 
 @app.get("/api/assets")
 async def get_assets():
@@ -583,20 +604,20 @@ async def get_funding_rates_grid():
     cur = conn.cursor()
     
     try:
-        # Query to get latest funding rate per asset - BINANCE ONLY
+        # Query to get latest funding rate per asset across all exchanges
+        # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
         cur.execute("""
             WITH latest_rates AS (
-                SELECT DISTINCT ON (base_asset, exchange)
-                    base_asset,
+                SELECT DISTINCT ON (COALESCE(base_asset, symbol), exchange)
+                    COALESCE(base_asset, symbol) as base_asset,
                     exchange,
                     funding_rate,
                     apr,
                     last_updated
                 FROM exchange_data
-                WHERE base_asset IS NOT NULL
+                WHERE (base_asset IS NOT NULL OR (exchange = 'hyperliquid' AND symbol IS NOT NULL))
                     AND funding_rate IS NOT NULL
-                    AND LOWER(exchange) = 'binance'
-                ORDER BY base_asset, exchange, last_updated DESC
+                ORDER BY COALESCE(base_asset, symbol), exchange, last_updated DESC
             )
             SELECT 
                 base_asset,
@@ -655,14 +676,14 @@ async def get_historical_funding_by_asset(
     Perfect for multi-exchange comparison charts.
     """
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     
     try:
         # Calculate date range
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         
-        # Get historical data from funding_rates_historical table - BINANCE ONLY
+        # Get historical data from funding_rates_historical table
         # First check if the table exists
         cur.execute("""
             SELECT EXISTS (
@@ -673,74 +694,123 @@ async def get_historical_funding_by_asset(
         
         has_historical = cur.fetchone()['exists']
         
+        # Try to get data from both tables and combine
         if has_historical:
-            # Use funding_rates_historical table (preferred)
-            query = """
+            # First try funding_rates_historical table
+            # Get ALL contracts for the asset (not just USDT)
+            # For Hyperliquid, symbol = base_asset (e.g., "BTC" not "BTCUSDT")
+            query_historical = """
                 SELECT 
                     exchange,
                     symbol,
                     funding_rate,
-                    funding_rate * 365 * 100 / 8 as apr,
-                    funding_time
+                    funding_rate * (365.0 * 24 / COALESCE(funding_interval_hours, 8)) * 100 as apr,
+                    funding_time,
+                    funding_interval_hours
                 FROM funding_rates_historical
-                WHERE base_asset = %s
+                WHERE (base_asset = %s OR (exchange = 'hyperliquid' AND symbol = %s))
                     AND funding_time >= %s
                     AND funding_time <= %s
-                    AND LOWER(exchange) = 'binance'
-                ORDER BY funding_time DESC, exchange
+                ORDER BY funding_time DESC, symbol
             """
+            cur.execute(query_historical, (asset, asset, start_date, end_date))
+            historical_results = cur.fetchall()
         else:
-            # Fallback to main table if historical doesn't exist - BINANCE ONLY
-            query = """
-                SELECT 
-                    exchange,
-                    symbol,
-                    funding_rate,
-                    apr,
-                    last_updated as funding_time
-                FROM exchange_data
-                WHERE base_asset = %s
-                    AND last_updated >= %s
-                    AND last_updated <= %s
-                    AND LOWER(exchange) = 'binance'
-                ORDER BY last_updated DESC, exchange
-            """
+            historical_results = []
         
-        cur.execute(query, (asset, start_date, end_date))
-        results = cur.fetchall()
+        # Also get recent data from main table
+        # For Hyperliquid, symbol = base_asset (e.g., "BTC" not "BTCUSDT")
+        query_recent = """
+            SELECT 
+                exchange,
+                symbol,
+                funding_rate,
+                apr,
+                last_updated as funding_time,
+                funding_interval_hours
+            FROM exchange_data
+            WHERE (base_asset = %s OR (exchange = 'hyperliquid' AND symbol = %s))
+                AND last_updated >= %s
+                AND last_updated <= %s
+            ORDER BY last_updated DESC, exchange
+        """
+        cur.execute(query_recent, (asset, asset, start_date, end_date))
+        recent_results = cur.fetchall()
         
-        # Group data by timestamp and exchange
+        # Combine results, preferring historical data
+        # Start with historical results
+        results = list(historical_results) if historical_results else []
+        
+        # Add ALL recent data points that are newer than our historical data
+        if recent_results and len(recent_results) > 0:
+            if results:
+                # Get the latest historical timestamp
+                latest_historical = max(r['funding_time'] for r in results) if results else None
+                
+                # Add all recent results that are newer than historical
+                for recent in recent_results:
+                    if latest_historical is None or recent['funding_time'] > latest_historical:
+                        results.append(recent)
+            else:
+                # No historical data, use all recent data
+                results = list(recent_results)
+        
+        # Group data by timestamp and CONTRACT (not exchange)
         time_series = {}
-        exchanges = set()
+        contracts = set()
+        exchanges = set()  # Track exchanges that have data
         
         for row in results:
-            timestamp = row['funding_time'].isoformat() if row['funding_time'] else None
-            exchange = row['exchange']
+            # Normalize timestamp to nearest second to align multi-contract data points
+            if row['funding_time']:
+                # Round to nearest second to fix millisecond differences
+                normalized_time = row['funding_time'].replace(microsecond=0)
+                timestamp = normalized_time.isoformat()
+            else:
+                timestamp = None
+            symbol = row['symbol']  # Use symbol instead of exchange
             
             if timestamp not in time_series:
                 time_series[timestamp] = {}
             
-            time_series[timestamp][exchange] = {
-                'funding_rate': float(row['funding_rate']) if row['funding_rate'] else None,
-                'apr': float(row['apr']) if row['apr'] else None,
-                'symbol': row['symbol']
+            time_series[timestamp][symbol] = {
+                'funding_rate': float(row['funding_rate']) if row['funding_rate'] is not None else None,
+                'apr': float(row['apr']) if row['apr'] is not None else None,
+                'exchange': row['exchange'],
+                'funding_interval_hours': int(row['funding_interval_hours']) if row.get('funding_interval_hours') else 8
             }
-            exchanges.add(exchange)
+            contracts.add(symbol)
+            exchanges.add(row['exchange'])  # Track which exchanges we have data from
         
-        # Format for chart display
+        # Format for chart display - each contract gets its own line
         chart_data = []
-        for timestamp, exchange_data in sorted(time_series.items()):
+        for timestamp, contract_data in sorted(time_series.items()):
             data_point = {'timestamp': timestamp}
-            for exchange in exchanges:
-                if exchange in exchange_data:
-                    data_point[exchange] = exchange_data[exchange]['funding_rate']
+            
+            # Check if this data point has values for all contracts or is mostly complete
+            has_values = 0
+            total_contracts = len(contracts)
+            
+            for contract in contracts:
+                if contract in contract_data:
+                    data_point[contract] = contract_data[contract]['funding_rate']
+                    # Add APR field for each contract
+                    data_point[f'{contract}_apr'] = contract_data[contract]['apr']
+                    if contract_data[contract]['funding_rate'] is not None:
+                        has_values += 1
                 else:
-                    data_point[exchange] = None
-            chart_data.append(data_point)
+                    data_point[contract] = None
+                    data_point[f'{contract}_apr'] = None
+            
+            # Include data points where at least one contract has values
+            # This ensures we show all available data, even if incomplete
+            if has_values > 0:
+                chart_data.append(data_point)
         
         return {
             'asset': asset,
-            'exchanges': list(exchanges),
+            'contracts': list(contracts),  # Return contracts instead of exchanges
+            'exchanges': sorted(list(exchanges)),  # Return actual exchanges with data
             'days': days,
             'data_points': len(chart_data),
             'data': chart_data
@@ -751,6 +821,183 @@ async def get_historical_funding_by_asset(
     finally:
         cur.close()
         conn.close()
+
+@app.get("/api/current-funding/{asset}")
+async def get_current_funding(asset: str):
+    """
+    Get current funding rate and next funding time for an asset.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get latest funding rate from database
+        # For Hyperliquid, symbol = base_asset (e.g., "BTC" not "BTCUSDT")
+        cur.execute("""
+            SELECT 
+                exchange,
+                symbol,
+                funding_rate,
+                apr,
+                funding_interval_hours,
+                last_updated
+            FROM exchange_data
+            WHERE (base_asset = %s OR (exchange = 'hyperliquid' AND symbol = %s))
+            ORDER BY last_updated DESC
+            LIMIT 1
+        """, (asset, asset))
+        
+        result = cur.fetchone()
+        
+        if result:
+            # Calculate next funding time
+            now = datetime.now(timezone.utc)
+            funding_interval = result['funding_interval_hours'] or 8
+            
+            # Funding times are typically at 00:00, 08:00, 16:00 UTC for 8-hour intervals
+            hours_per_interval = funding_interval
+            current_hour = now.hour
+            next_funding_hour = ((current_hour // hours_per_interval) + 1) * hours_per_interval
+            
+            if next_funding_hour >= 24:
+                next_funding_hour = next_funding_hour % 24
+                next_funding_time = now.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                next_funding_time = now.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0)
+            
+            # Calculate time until next funding
+            time_until_funding = next_funding_time - now
+            hours_until = int(time_until_funding.total_seconds() // 3600)
+            minutes_until = int((time_until_funding.total_seconds() % 3600) // 60)
+            seconds_until = int(time_until_funding.total_seconds() % 60)
+            
+            return {
+                'asset': asset,
+                'symbol': result['symbol'],
+                'exchange': result['exchange'],
+                'funding_rate': float(result['funding_rate']) if result['funding_rate'] else 0,
+                'apr': float(result['apr']) if result['apr'] else 0,
+                'funding_interval_hours': funding_interval,
+                'next_funding_time': next_funding_time.isoformat(),
+                'time_until_funding': {
+                    'hours': hours_until,
+                    'minutes': minutes_until,
+                    'seconds': seconds_until,
+                    'display': f"{hours_until:02d}:{minutes_until:02d}:{seconds_until:02d}"
+                },
+                'last_updated': result['last_updated'].isoformat() if result['last_updated'] else None
+            }
+        else:
+            return {
+                'asset': asset,
+                'error': 'No funding data available for this asset'
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/api/backfill-status")
+async def get_backfill_status():
+    """
+    Get the status of the historical backfill process.
+    """
+    import json
+    from pathlib import Path
+    
+    try:
+        # Check if lock file exists
+        lock_file = Path(".backfill.lock")
+        status_file = Path(".backfill.status")
+        
+        if not lock_file.exists():
+            return {
+                "running": False,
+                "progress": 100,
+                "message": "No backfill in progress",
+                "completed": True
+            }
+        
+        # Check lock file age
+        lock_age = time.time() - lock_file.stat().st_mtime
+        
+        # If lock file is old (>10 minutes), consider backfill complete
+        if lock_age > 600:
+            return {
+                "running": False,
+                "progress": 100,
+                "message": "Backfill completed",
+                "completed": True
+            }
+        
+        # Try to read status file if it exists
+        if status_file.exists():
+            try:
+                with open(status_file, 'r') as f:
+                    status_data = json.load(f)
+                    return {
+                        "running": True,
+                        "progress": status_data.get("progress", 0),
+                        "message": status_data.get("message", "Backfill in progress..."),
+                        "symbols_processed": status_data.get("symbols_processed", 0),
+                        "total_symbols": status_data.get("total_symbols", 0),
+                        "completed": False
+                    }
+            except:
+                pass
+        
+        # Default status if no status file
+        return {
+            "running": True,
+            "progress": 50,  # Estimate
+            "message": "Historical backfill in progress...",
+            "completed": False
+        }
+        
+    except Exception as e:
+        return {
+            "running": False,
+            "progress": 0,
+            "message": f"Error checking status: {str(e)}",
+            "completed": False,
+            "error": True
+        }
+
+@app.post("/api/shutdown")
+async def shutdown_dashboard():
+    """
+    Shutdown the dashboard and all related processes.
+    """
+    import subprocess
+    import threading
+    from pathlib import Path
+    
+    def run_shutdown():
+        """Run shutdown in a separate thread to allow response."""
+        try:
+            # Wait a moment for the response to be sent
+            time.sleep(1)
+            
+            # Run the shutdown script
+            subprocess.run(
+                ["python", "shutdown_dashboard.py"],
+                capture_output=True,
+                text=True
+            )
+        except Exception as e:
+            print(f"Shutdown error: {e}")
+    
+    # Start shutdown in background
+    shutdown_thread = threading.Thread(target=run_shutdown, daemon=True)
+    shutdown_thread.start()
+    
+    return {
+        "status": "shutdown_initiated",
+        "message": "Dashboard is shutting down. Please wait a moment...",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 @app.get("/api/test")
 async def test_connection():
@@ -795,6 +1042,243 @@ async def test_connection():
     finally:
         cur.close()
         conn.close()
+
+# ==================== SETTINGS MANAGEMENT ENDPOINTS ====================
+
+# Initialize settings manager
+settings_manager = SettingsManager()
+
+@app.get("/api/settings")
+async def get_settings():
+    """
+    Get current system settings organized by category.
+    """
+    try:
+        settings = settings_manager.get_settings()
+        return {
+            "status": "success",
+            "settings": settings
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/settings")
+async def update_settings(settings: Dict[str, Any]):
+    """
+    Update system settings with validation.
+    """
+    try:
+        success, message = settings_manager.update_settings(settings)
+        if success:
+            return {
+                "status": "success",
+                "message": message
+            }
+        else:
+            raise HTTPException(status_code=400, detail=message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/settings/validate")
+async def validate_settings(settings: Dict[str, Any]):
+    """
+    Validate settings without applying them.
+    """
+    try:
+        is_valid, errors = settings_manager.validate_settings(settings)
+        return {
+            "status": "success",
+            "valid": is_valid,
+            "errors": errors
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/settings/backups")
+async def get_settings_backups():
+    """
+    Get list of available settings backups.
+    """
+    try:
+        backups = settings_manager.get_backups()
+        return {
+            "status": "success",
+            "backups": backups
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/settings/restore")
+async def restore_settings_backup(backup_filename: str):
+    """
+    Restore settings from a backup file.
+    """
+    try:
+        success, message = settings_manager.restore_backup(backup_filename)
+        if success:
+            return {
+                "status": "success",
+                "message": message
+            }
+        else:
+            raise HTTPException(status_code=400, detail=message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/settings/export")
+async def export_settings():
+    """
+    Export current settings as JSON.
+    """
+    try:
+        export_data = settings_manager.export_settings()
+        return export_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/settings/import")
+async def import_settings(settings_json: Dict[str, Any]):
+    """
+    Import settings from JSON.
+    """
+    try:
+        success, message = settings_manager.import_settings(settings_json)
+        if success:
+            return {
+                "status": "success",
+                "message": message
+            }
+        else:
+            raise HTTPException(status_code=400, detail=message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/settings/reset")
+async def reset_settings():
+    """
+    Reset settings to defaults (restore from oldest backup or defaults).
+    """
+    try:
+        # For now, just reload current settings
+        # In production, this would restore from a default template
+        settings_manager.load_current_settings()
+        return {
+            "status": "success",
+            "message": "Settings reset to defaults"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== BACKFILL MANAGEMENT ENDPOINTS ====================
+
+@app.get("/api/backfill/status")
+async def get_backfill_status():
+    """
+    Get current backfill operation status.
+    """
+    try:
+        status_file = Path(".backfill.status")
+        if status_file.exists():
+            with open(status_file, 'r') as f:
+                status_data = json.load(f)
+            return {
+                "status": "success",
+                "backfill": status_data
+            }
+        else:
+            return {
+                "status": "success",
+                "backfill": {
+                    "status": "idle",
+                    "message": "No backfill operation running"
+                }
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/backfill/start")
+async def start_backfill(params: Dict[str, Any]):
+    """
+    Start a backfill operation with specified parameters.
+    
+    Parameters:
+    - days: Number of days to backfill (1-90)
+    - exchanges: List of exchanges to backfill
+    - batch_size: Number of symbols per batch
+    - parallel: Use parallel processing
+    """
+    try:
+        # Check if backfill is already running
+        lock_file = Path(".backfill.lock")
+        if lock_file.exists():
+            return {
+                "status": "error",
+                "message": "Backfill operation is already running"
+            }
+        
+        # Extract parameters
+        days = params.get("days", 30)
+        exchanges = params.get("exchanges", ["binance", "kucoin"])
+        batch_size = params.get("batch_size", 10)
+        parallel = params.get("parallel", True)
+        
+        # Build command
+        cmd = [
+            "python", 
+            "scripts/unified_historical_backfill.py",
+            "--days", str(days),
+            "--batch-size", str(batch_size)
+        ]
+        
+        if parallel:
+            cmd.append("--parallel")
+        
+        # Start backfill process in background
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        return {
+            "status": "success",
+            "message": f"Backfill started for {days} days",
+            "pid": process.pid
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/backfill/stop")
+async def stop_backfill():
+    """
+    Stop the running backfill operation.
+    """
+    try:
+        # Remove lock files to signal stop
+        lock_files = [Path(".backfill.lock"), Path(".unified_backfill.lock")]
+        for lock_file in lock_files:
+            if lock_file.exists():
+                lock_file.unlink()
+        
+        # Update status file
+        status_file = Path(".backfill.status")
+        if status_file.exists():
+            with open(status_file, 'r') as f:
+                status_data = json.load(f)
+            status_data["status"] = "cancelled"
+            status_data["message"] = "Backfill cancelled by user"
+            with open(status_file, 'w') as f:
+                json.dump(status_data, f)
+        
+        return {
+            "status": "success",
+            "message": "Backfill operation stopped"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

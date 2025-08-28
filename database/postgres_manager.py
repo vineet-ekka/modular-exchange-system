@@ -199,20 +199,22 @@ class PostgresManager:
                     float(row['funding_rate']) if pd.notna(row['funding_rate']) else None,
                     row['funding_time'],
                     float(row.get('mark_price')) if pd.notna(row.get('mark_price')) else None,
-                    int(row['funding_interval_hours'])
+                    int(row['funding_interval_hours']),
+                    row.get('base_asset', None)  # Add base_asset
                 )
                 records.append(record)
             
-            # Insert query with ON CONFLICT handling
+            # Insert query with ON CONFLICT handling - including base_asset
             insert_query = """
                 INSERT INTO funding_rates_historical 
-                (exchange, symbol, funding_rate, funding_time, mark_price, funding_interval_hours)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (exchange, symbol, funding_rate, funding_time, mark_price, funding_interval_hours, base_asset)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (exchange, symbol, funding_time) 
                 DO UPDATE SET 
                     funding_rate = EXCLUDED.funding_rate,
                     mark_price = EXCLUDED.mark_price,
-                    funding_interval_hours = EXCLUDED.funding_interval_hours
+                    funding_interval_hours = EXCLUDED.funding_interval_hours,
+                    base_asset = EXCLUDED.base_asset
             """
             
             # Batch insert

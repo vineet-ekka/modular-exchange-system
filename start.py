@@ -292,7 +292,7 @@ def start_data_collector(quiet=True):
         return False
 
 def start_background_historical_backfill():
-    """Start 30-day historical backfill in background thread."""
+    """Start 7-day historical backfill in background thread."""
     lock_file = Path(".backfill.lock")
     
     def _run_backfill():
@@ -338,7 +338,7 @@ def start_background_historical_backfill():
     thread = threading.Thread(target=_run_backfill, daemon=True)
     thread.start()
     
-    print_status("Background: Refreshing complete 30-day historical data", "info")
+    print_status("Background: Refreshing last 7 days of historical data", "info")
     print_status("Dashboard will auto-update as new data arrives", "info")
     return thread
 
@@ -360,10 +360,10 @@ def print_summary():
     print(f"  PostgreSQL: localhost:5432")
     print(f"\n{Colors.GREEN}Background processes:{Colors.RESET}")
     print(f"  Real-time collector: Every 30 seconds")
-    print(f"  Historical refresh: 30-day backfill running")
+    print(f"  Historical refresh: 7-day backfill running")
     print(f"\n{Colors.BLUE}Data updates:{Colors.RESET}")
     print(f"  Dashboard auto-refreshes every 30 seconds")
-    print(f"  Historical data updating in background (~5 min)")
+    print(f"  Historical data updating in background (~2-3 min)")
     print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}")
 
 def main():

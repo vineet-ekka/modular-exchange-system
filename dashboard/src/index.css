@@ -4,38 +4,59 @@
 
 @layer base {
   body {
-    @apply antialiased;
+    @apply antialiased bg-light-bg text-text-primary;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors;
+    @apply px-4 py-2 bg-accent-blue text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm;
   }
   
   .card {
-    @apply bg-gray-800 rounded-xl shadow-xl p-6;
+    @apply bg-white rounded-xl shadow-lg border border-light-border p-6;
   }
   
   .input-field {
-    @apply bg-gray-700 border-gray-600 text-gray-100 rounded-lg focus:ring-blue-500 focus:border-blue-500;
+    @apply bg-white border-light-border text-text-primary rounded-lg focus:ring-accent-blue focus:border-accent-blue;
   }
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar for light theme */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-800;
+  @apply bg-gray-100 rounded;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-600 rounded;
+  @apply bg-gray-400 rounded hover:bg-gray-500;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-gray-500;
+}
+
+/* Expand/collapse animation for contract details */
+.expand-animation {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Chevron rotation animation */
+.chevron-rotate {
+  transition: transform 0.2s ease;
 }
