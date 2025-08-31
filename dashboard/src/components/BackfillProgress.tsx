@@ -20,13 +20,27 @@ const BackfillProgress: React.FC = () => {
         const response = await fetch('http://localhost:8000/api/backfill-status');
         const data: BackfillStatus = await response.json();
         
+        // Stop polling if progress is 100% regardless of completed flag
+        if (data.progress >= 100) {
+          setStatus({
+            ...data,
+            running: false,
+            completed: true
+          });
+          // Hide after 3 seconds
+          setTimeout(() => {
+            setIsVisible(false);
+          }, 3000);
+          return; // Stop checking
+        }
+        
         // Show the indicator if backfill is running
         if (data.running) {
           setIsVisible(true);
         }
         
         // Hide the indicator if backfill is complete
-        if (data.completed && data.progress === 100 && !data.running) {
+        if (data.completed && !data.running) {
           // Keep it visible for 3 seconds after completion
           setTimeout(() => {
             setIsVisible(false);
@@ -36,28 +50,25 @@ const BackfillProgress: React.FC = () => {
         setStatus(data);
       } catch (error) {
         console.error('Error fetching backfill status:', error);
-        setStatus({
-          running: false,
-          progress: 0,
-          message: 'Unable to check backfill status',
-          completed: false,
-          error: true
-        });
+        setIsVisible(false); // Hide on error to prevent continuous polling
       }
     };
 
     // Initial check
     checkBackfillStatus();
 
-    // Check every 5 seconds while visible
-    const interval = setInterval(() => {
-      if (isVisible) {
-        checkBackfillStatus();
-      }
-    }, 5000);
+    // Only set interval if we should be checking
+    let interval: NodeJS.Timeout | undefined;
+    if (isVisible && (!status || (status.progress < 100 && status.running))) {
+      // Use longer interval after 50% progress
+      const pollInterval = status?.progress && status.progress > 50 ? 15000 : 5000;
+      interval = setInterval(checkBackfillStatus, pollInterval);
+    }
 
-    return () => clearInterval(interval);
-  }, [isVisible]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isVisible, status?.progress, status?.running]);
 
   // Don't render if not visible or no status
   if (!isVisible || !status) {

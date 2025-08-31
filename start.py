@@ -269,22 +269,45 @@ def start_data_collector(quiet=True):
         if quiet:
             cmd.append("--quiet")
         
-        if sys.platform == "win32":
-            subprocess.Popen(
-                cmd,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-                cwd=Path.cwd()
-            )
-        else:
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                cwd=Path.cwd()
-            )
+        # Check if main.py exists first
+        if not Path("main.py").exists():
+            print_status("main.py not found in current directory", "error")
+            return False
         
-        print_status("Data collector started (30-second intervals for real-time updates)", "success")
-        return True
+        # Create a log file for the data collector
+        log_file = Path("data_collector.log")
+        
+        if sys.platform == "win32":
+            # On Windows, write output to a log file instead of creating new console
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd(),
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+        else:
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd()
+                )
+        
+        # Wait a moment to check if process started successfully
+        time.sleep(2)
+        
+        # Check if process is still running
+        if process.poll() is None:
+            print_status("Data collector started (30-second intervals for real-time updates)", "success")
+            print_status(f"Data collector log: {log_file}", "info")
+            return True
+        else:
+            print_status("Data collector failed to start. Check data_collector.log for details", "warning")
+            print("   You can start it manually with: python main.py --loop --interval 30")
+            return False
         
     except Exception as e:
         print_status(f"Failed to start data collector: {e}", "warning")
@@ -348,7 +371,7 @@ def open_dashboard():
     time.sleep(2)
     webbrowser.open("http://localhost:3000")
 
-def print_summary():
+def print_summary(collector_running=True):
     """Print summary of running services."""
     print("\n" + "="*60)
     print(f"{Colors.BOLD}DASHBOARD READY!{Colors.RESET}")
@@ -359,11 +382,15 @@ def print_summary():
     print(f"  API Docs:   {Colors.BLUE}http://localhost:8000/docs{Colors.RESET}")
     print(f"  PostgreSQL: localhost:5432")
     print(f"\n{Colors.GREEN}Background processes:{Colors.RESET}")
-    print(f"  Real-time collector: Every 30 seconds")
-    print(f"  Historical refresh: 7-day backfill running")
+    if collector_running:
+        print(f"  Real-time collector: Every 30 seconds (check data_collector.log)")
+    else:
+        print(f"  Real-time collector: {Colors.YELLOW}Not running - start manually with:{Colors.RESET}")
+        print(f"    python main.py --loop --interval 30")
+    print(f"  Historical refresh: 30-day backfill running")
     print(f"\n{Colors.BLUE}Data updates:{Colors.RESET}")
     print(f"  Dashboard auto-refreshes every 30 seconds")
-    print(f"  Historical data updating in background (~2-3 min)")
+    print(f"  Historical data updating in background (~5-7 min)")
     print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}")
 
 def main():
@@ -406,7 +433,7 @@ def main():
     print()  # Empty line for spacing
     
     # Step 6: Start data collector (optional, don't fail if it doesn't work)
-    start_data_collector(quiet=True)
+    collector_started = start_data_collector(quiet=True)
     
     print()  # Empty line for spacing
     
@@ -419,7 +446,7 @@ def main():
     open_dashboard()
     
     # Step 9: Show summary
-    print_summary()
+    print_summary(collector_running=collector_started)
     
     # Keep running until Ctrl+C
     try:

@@ -331,9 +331,14 @@ class BinanceExchange(BaseExchange):
             Examples:
             - 1000SHIBUSDT -> SHIB
             - 1000000MOGUSDT -> MOG
+            - 1MBABYDOGEUSDT -> BABYDOGE
             - BTCUSDT -> BTC (unchanged)
+            - 1INCHUSDT -> 1INCH (unchanged, legitimate token name)
             """
-            if symbol.startswith('1000000'):
+            # Special case for 1MBABYDOGE (1M = 1 Million denomination)
+            if symbol.startswith('1MBABYDOGE'):
+                return 'BABYDOGE'
+            elif symbol.startswith('1000000'):
                 # Remove the 1000000 prefix and any quote currency suffix
                 clean = symbol[7:]  # Remove '1000000'
                 # Remove common quote currencies

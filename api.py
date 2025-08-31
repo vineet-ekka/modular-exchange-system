@@ -606,6 +606,7 @@ async def get_funding_rates_grid():
     try:
         # Query to get latest funding rate per asset across all exchanges
         # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
+        # Also get the most common funding interval for each asset-exchange pair
         cur.execute("""
             WITH latest_rates AS (
                 SELECT DISTINCT ON (COALESCE(base_asset, symbol), exchange)
@@ -613,6 +614,7 @@ async def get_funding_rates_grid():
                     exchange,
                     funding_rate,
                     apr,
+                    funding_interval_hours,
                     last_updated
                 FROM exchange_data
                 WHERE (base_asset IS NOT NULL OR (exchange = 'hyperliquid' AND symbol IS NOT NULL))
@@ -625,7 +627,8 @@ async def get_funding_rates_grid():
                     exchange, 
                     json_build_object(
                         'funding_rate', funding_rate,
-                        'apr', apr
+                        'apr', apr,
+                        'funding_interval_hours', funding_interval_hours
                     )
                 ) as exchange_rates
             FROM latest_rates
@@ -648,7 +651,8 @@ async def get_funding_rates_grid():
                 for exchange, rates in row['exchange_rates'].items():
                     asset_data['exchanges'][exchange] = {
                         'funding_rate': float(rates['funding_rate']) if rates['funding_rate'] else None,
-                        'apr': float(rates['apr']) if rates['apr'] else None
+                        'apr': float(rates['apr']) if rates['apr'] else None,
+                        'funding_interval_hours': int(rates['funding_interval_hours']) if rates.get('funding_interval_hours') else None
                     }
             
             grid_data.append(asset_data)
@@ -903,16 +907,17 @@ async def get_current_funding(asset: str):
 async def get_backfill_status():
     """
     Get the status of the historical backfill process.
+    Auto-fixes stuck states when progress is 100%.
     """
     import json
     from pathlib import Path
     
     try:
-        # Check if lock file exists
         lock_file = Path(".backfill.lock")
         status_file = Path(".backfill.status")
         
-        if not lock_file.exists():
+        # If no status file, backfill is not running
+        if not status_file.exists():
             return {
                 "running": False,
                 "progress": 100,
@@ -920,49 +925,51 @@ async def get_backfill_status():
                 "completed": True
             }
         
-        # Check lock file age
-        lock_age = time.time() - lock_file.stat().st_mtime
-        
-        # If lock file is old (>10 minutes), consider backfill complete
-        if lock_age > 600:
-            return {
-                "running": False,
-                "progress": 100,
-                "message": "Backfill completed",
-                "completed": True
-            }
-        
-        # Try to read status file if it exists
-        if status_file.exists():
-            try:
-                with open(status_file, 'r') as f:
-                    status_data = json.load(f)
-                    return {
-                        "running": True,
-                        "progress": status_data.get("progress", 0),
-                        "message": status_data.get("message", "Backfill in progress..."),
-                        "symbols_processed": status_data.get("symbols_processed", 0),
-                        "total_symbols": status_data.get("total_symbols", 0),
-                        "completed": False
-                    }
-            except:
-                pass
-        
-        # Default status if no status file
-        return {
-            "running": True,
-            "progress": 50,  # Estimate
-            "message": "Historical backfill in progress...",
-            "completed": False
-        }
-        
+        # Read status file
+        with open(status_file, 'r') as f:
+            status_data = json.load(f)
+            
+            # Auto-fix completed state when progress is 100%
+            if status_data.get("progress", 0) >= 100:
+                if not status_data.get("completed") or status_data.get("running"):
+                    status_data["completed"] = True
+                    status_data["running"] = False
+                    
+                    # Update the file with corrected status
+                    with open(status_file, 'w') as fw:
+                        json.dump(status_data, fw, indent=2)
+            
+            # If lock file doesn't exist but status shows running, fix it
+            if not lock_file.exists() and status_data.get("running", False):
+                status_data["running"] = False
+                status_data["completed"] = True
+                with open(status_file, 'w') as fw:
+                    json.dump(status_data, fw, indent=2)
+            
+            # Check lock file age if it exists
+            if lock_file.exists():
+                lock_age = time.time() - lock_file.stat().st_mtime
+                # If lock file is old (>10 minutes), consider backfill complete
+                if lock_age > 600:
+                    status_data["running"] = False
+                    status_data["completed"] = True
+                    with open(status_file, 'w') as fw:
+                        json.dump(status_data, fw, indent=2)
+                    # Remove old lock file
+                    try:
+                        lock_file.unlink()
+                    except:
+                        pass
+            
+            return status_data
+            
     except Exception as e:
         return {
             "running": False,
-            "progress": 0,
-            "message": f"Error checking status: {str(e)}",
-            "completed": False,
-            "error": True
+            "progress": 100,
+            "message": "Status check error",
+            "completed": True,
+            "error": str(e)
         }
 
 @app.post("/api/shutdown")

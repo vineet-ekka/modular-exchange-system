@@ -34,7 +34,11 @@
       "WebFetch(domain:github.com)",
       "Bash(start debug_dashboard.html)",
       "Bash(dir:*)",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npx tsc:*)",
+      "Bash(docker-compose up:*)"
     ],
     "deny": []
   }

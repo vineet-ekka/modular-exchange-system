@@ -31,8 +31,8 @@ A comprehensive, production-ready cryptocurrency funding rate tracking system su
 # Starts everything automatically
 python start.py
 
-# Or on Windows, just double-click:
-start.bat
+# On Windows, can also use:
+python start.py
 ```
 
 This automatically:
@@ -41,8 +41,9 @@ This automatically:
 3. Installs npm dependencies (if needed)
 4. Starts API server
 5. Starts React dashboard  
-6. Starts data collector with 30-second updates
-7. Opens browser automatically
+6. Starts data collector with 30-second updates (logs to `data_collector.log`)
+7. Starts background historical data refresh (30-day backfill)
+8. Opens browser automatically
 
 ### Access Points
 - **Dashboard**: http://localhost:3000
@@ -161,6 +162,10 @@ This automatically:
 ### Dashboard Features
 - ✅ Asset-based grid view (600+ assets)
 - ✅ Expandable rows showing individual contracts
+- ✅ **Funding Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
+- ✅ **Enhanced Search**: Search both assets AND contracts simultaneously
+- ✅ **Auto-expansion**: Automatically expands assets when contracts match search
+- ✅ **Search Highlighting**: Matching contracts highlighted in blue
 - ✅ Multi-contract historical charts
 - ✅ Live funding rate ticker
 - ✅ Countdown timer to next funding
@@ -231,6 +236,7 @@ cd modular-exchange-system
 ```bash
 # Python dependencies
 pip install -r requirements.txt
+pip install fastapi uvicorn psutil  # Additional required packages
 
 # Dashboard dependencies
 cd dashboard && npm install && cd ..
@@ -410,14 +416,22 @@ Response:
 - **Multi-Exchange Columns**: Side-by-side comparison
 - **Expandable Details**: Click to see individual contracts
 - **Color Coding**: Visual indicators for rate direction
-- **Search & Filter**: Real-time asset filtering
+- **Advanced Search**: 
+  - Search assets by name (e.g., "BTC", "ETH")
+  - Search contracts by symbol (e.g., "BTCUSDT", "XBTUSDTM")
+  - Search by partial match (e.g., "USDT" finds all USDT pairs)
+  - Search by exchange name (e.g., "Binance", "KuCoin")
+  - Auto-expands assets when contracts match
+  - Highlights matching contracts in blue
 - **Sorting**: Multi-column sorting with indicators
 
 ### Historical Charts
 - **Time Ranges**: 1D, 7D, 30D views
 - **Multi-Contract**: Compare multiple contracts
 - **APR Display**: Annualized rates for comparison
-- **Interactive**: Hover for detailed values
+- **Step Function Display**: Accurate representation of funding rate changes
+- **Interactive**: Enhanced tooltips with funding intervals and change indicators
+- **Reference Lines**: Visual markers at actual funding update times
 - **Export**: Download data as CSV
 
 ### Real-time Monitoring
@@ -490,7 +504,6 @@ modular_exchange_system/
 ├── scripts/                       # Utility scripts
 │   ├── unified_historical_backfill.py    # Multi-exchange backfill
 │   ├── fix_funding_intervals.py          # Data maintenance
-│   ├── historical_updater.py             # Continuous historical updates
 │   └── hyperliquid_gap_filler.py         # Specific gap filling
 │
 ├── sql/                           # Database schemas
@@ -504,17 +517,16 @@ modular_exchange_system/
 │   ├── health_check.py            # Health status reporting
 │   └── data_validator.py          # Data validation
 │
-├── tests/                         # Test files
-│   ├── test_all_exchanges.py      # Exchange integration tests
-│   ├── test_db.py                 # Database connection tests
-│   ├── test_hyperliquid.py        # Hyperliquid-specific tests
-│   ├── test_synchronized_dates.py # Date sync tests
-│   └── test_unified_dates_simulation.py # Date simulation tests
+├── utils/                         # Utility modules
+│   ├── logger.py                  # Logging configuration
+│   ├── rate_limiter.py            # API rate limiting
+│   ├── health_tracker.py          # System health monitoring
+│   ├── health_check.py            # Health status reporting
+│   └── data_validator.py          # Data validation
 │
 ├── database_tools.py              # Consolidated database utilities
-├── fill_data_gaps.py              # Gap filling for historical data
-├── run_backfill.py                # Backfill wrapper script
-└── shutdown_dashboard.py          # Clean shutdown utility
+├── shutdown_dashboard.py          # Clean shutdown utility
+└── zzz_revised.md                 # Z-score implementation specification
 ```
 
 ## 💾 Database Schema
@@ -605,17 +617,19 @@ elif funding_interval_hours == 8:
 - Dynamic funding interval detection
 - Historical data unlimited time range
 - Rate limit: 40 requests/second
-- **Base Asset Normalization**: Handles `1000` prefix (e.g., `1000SHIBUSDT` → `SHIB`) and `1000000` prefix (e.g., `1000000MOGUSDT` → `MOG`)
+- **Base Asset Normalization**: Handles `1000` prefix (e.g., `1000SHIBUSDT` → `SHIB`), `1000000` prefix (e.g., `1000000MOGUSDT` → `MOG`), and `1MBABYDOGE` (e.g., `1MBABYDOGEUSDT` → `BABYDOGE`)
 
 #### KuCoin
 - XBT prefix for Bitcoin (XBT → BTC normalization)
 - Multiple funding intervals (1h, 2h, 4h, 8h)
 - Recent data only from API
 - Rate limit: 30 requests/second
-- **Base Asset Normalization**: Handles `1000000`, `10000`, and `1000` prefixes (checked in order)
+- **Base Asset Normalization**: Handles `1000000`, `10000`, `1000` prefixes (checked in order), and `1MBABYDOGE`
   - `1000000MOGUSDTM` → `MOG`
   - `10000CATUSDTM` → `CAT`
   - `1000BONKUSDTM` → `BONK`
+  - `1000XUSDTM` → `X` (special case: 1000X is X token with 1000x denomination)
+  - `1MBABYDOGEUSDTM` → `BABYDOGE` (1M = 1 Million denomination)
 
 #### Backpack
 - USDC-margined contracts
@@ -714,6 +728,62 @@ elif funding_interval_hours == 8:
   - Hyperliquid & Backpack: `k` prefix tokens
 - Fixed edge cases like `10000CATUSDTM` → `CAT`, `1000000MOGUSDTM` → `MOG`
 
+#### Phase 22: Dashboard Search Enhancement (2025-08-28)
+- **Enhanced Search Functionality**: Can now search both assets and contracts
+- **Auto-Expansion**: Assets automatically expand when contracts match search
+- **Visual Highlighting**: Matching contracts highlighted with blue border
+- **Search Modes**: Search by asset name, contract symbol, exchange, or partial matches
+- **Pre-fetching**: All contract data pre-loaded for instant search results
+
+#### Phase 23: Data Collector Reliability (2025-08-28)
+- **Improved Startup**: Better error handling in `start.py`
+- **Process Monitoring**: Verifies data collector starts successfully
+- **Logging Support**: Output redirected to `data_collector.log`
+- **Windows Compatibility**: Fixed console window issues on Windows
+- **Status Feedback**: Clear indication if collector fails to start
+
+#### Phase 24: Documentation Enhancement (2025-08-28)
+- **Enhanced CLAUDE.md**: Improved guidance for Claude Code instances
+- **Background Process Monitoring**: Added instructions for managing background processes
+- **Windows Support**: Better Windows-specific commands and alternatives
+- **Dependency Clarity**: Added missing package installations (fastapi, uvicorn, psutil)
+- **Troubleshooting**: Expanded debugging and status checking commands
+
+#### Phase 25: 1000X Token Normalization Fix (2025-08-28)
+- **Fixed 1000X token**: Special handling for KuCoin's 1000XUSDTM contract
+- **Normalization**: 1000X correctly normalized to "X" (representing X token with 1000x denomination)
+- **Unified display**: X token now appears consistently across Binance and KuCoin
+- **Edge case handling**: Added explicit check for baseCurrency='1000X' from KuCoin API
+
+#### Phase 26: 1MBABYDOGE Normalization (2025-08-29)
+- **Added 1MBABYDOGE normalization**: 1M denomination (1 Million) now properly handled
+- **Normalization**: `1MBABYDOGEUSDT` and `1MBABYDOGEUSDTM` → `BABYDOGE`
+- **Unified display**: Both Binance and KuCoin 1MBABYDOGE contracts now grouped under BABYDOGE asset
+- **Denomination recognition**: System correctly identifies 1M as a denomination prefix like 1000, 10000, etc.
+
+#### Phase 27: Step Function Chart Implementation (2025-08-29)
+- **Chart Accuracy**: Replaced smooth curves with step functions for funding rates
+- **Interval Detection**: Automatically detects funding intervals (1h, 2h, 4h, 8h)
+- **Forward Fill**: Properly handles null values with last known values
+- **Enhanced Tooltips**: Shows funding interval, change percentage, and data type
+- **Visual Indicators**: Reference lines at actual funding update times
+- **Performance**: Disabled animations for better performance with 720+ data points
+
+#### Phase 28: Dashboard Refresh Fix (2025-08-29)
+- **Fixed Stuck Backfill**: Corrected backfill status file preventing infinite polling
+- **Smart Polling Logic**: BackfillProgress component now stops polling at 100% progress
+- **API Auto-fix**: Backfill status endpoint automatically corrects inconsistent states
+- **Removed Pre-fetch**: Eliminated automatic fetching of 600+ assets on mount
+- **Performance Boost**: Reduced API calls from ~720/hour to ~120/hour (83% reduction)
+- **Smart Search**: Added debounced search with on-demand contract fetching
+
+#### Phase 29: Funding Interval Display (2025-08-29)
+- **Contract Details Enhancement**: Added funding interval column to expanded contract view
+- **Clear Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
+- **API Update**: Modified `/api/funding-rates-grid` endpoint to include funding_interval_hours
+- **Clean UI**: Interval shown only in contract details table for clarity
+- **Essential Information**: Helps traders understand holding costs and funding payment frequency
+
 #### Phase 16-20: Recent Improvements (2025-08-21)
 - Synchronized historical windows
 - Bug fixes for historical page
@@ -728,6 +798,14 @@ elif funding_interval_hours == 8:
 4. **Historical Data Completeness**: Zero value handling
 5. **Open Interest Display**: Dynamic unit formatting
 6. **Base Asset Normalization**: Fixed duplicate assets in dashboard (e.g., "1000BONK" and "BONK" now unified)
+7. **Dashboard Search**: Can now search both assets and contracts with auto-expansion
+8. **Data Collector Startup**: Improved reliability with logging and error handling
+9. **Documentation Enhancement**: Improved CLAUDE.md for better Claude Code integration
+10. **1000X Token Fix**: Correctly normalizes KuCoin's 1000XUSDTM to "X" instead of "1000X"
+11. **1MBABYDOGE Normalization**: Added support for 1M (1 Million) denomination prefix
+12. **Step Function Charts**: Accurate representation of funding rate changes with proper intervals
+13. **Dashboard Refresh Fix**: Eliminated constant refreshing from stuck backfill status
+14. **Funding Interval Display**: Added clear display of funding frequency for each contract
 
 ## ⚡ Performance Metrics
 
@@ -805,6 +883,13 @@ Check for asset-specific issues in logs. The system may be retrying failed reque
 - Verify exchange enable/disable settings
 - Ensure sequential collection settings are correct
 
+#### Data Collector Not Starting
+- Check `data_collector.log` for error messages
+- Verify `main.py` exists in the project root
+- Try starting manually: `python main.py --loop --interval 30`
+- On Windows, check if Python is in PATH
+- Ensure all required dependencies are installed: `pip install -r requirements.txt`
+
 ## 📜 Scripts & Utilities
 
 ### Data Collection
@@ -819,9 +904,6 @@ python main.py --loop --interval 30 --quiet
 ### Historical Backfill
 ```bash
 # All exchanges (parallel) - Recommended
-python run_backfill.py --days 30 --parallel
-
-# Alternative: Direct script execution
 python scripts/unified_historical_backfill.py --days 30 --parallel
 
 # Specific exchanges only
@@ -839,8 +921,8 @@ python database_tools.py clear --quick
 # Fix funding intervals
 python scripts/fix_funding_intervals.py
 
-# Fill data gaps
-python fill_data_gaps.py
+# Fill Hyperliquid gaps
+python scripts/hyperliquid_gap_filler.py
 ```
 
 ### System Control
@@ -895,14 +977,11 @@ python main.py --loop --interval 30
 
 ### Testing
 ```bash
-# Python tests
-pytest tests/
-
 # JavaScript tests
 cd dashboard && npm test
 
-# Integration tests
-python test_all_exchanges.py
+# Test exchange connections
+python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(f'Binance: {len(e.fetch_data())} contracts')"
 ```
 
 ## 📝 License
@@ -947,10 +1026,10 @@ python scripts/unified_historical_backfill.py --days 30 --exchanges binance kuco
 
 ---
 
-*Last Updated: 2025-08-28*
-*Version: 1.3.0*
+*Last Updated: 2025-08-31*
+*Version: 1.5.3*
 *Total Contracts: 1,240*
 *Active Exchanges: 4*
 *Unique Assets: 600+*
-*Project Status: Clean & Optimized*
-*Recent Fix: Base asset normalization for unified display across all exchanges*
+*Project Status: Production Ready*
+*Recent Updates: Project cleanup, improved documentation, removed redundant files*

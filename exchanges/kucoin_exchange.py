@@ -90,6 +90,14 @@ class KuCoinExchange(BaseExchange):
             # First handle XBT -> BTC
             base = 'BTC' if base_currency == 'XBT' else base_currency
             
+            # Special case for 1MBABYDOGE (1M = 1 Million denomination)
+            if symbol.startswith('1MBABYDOGE'):
+                return 'BABYDOGE'
+            
+            # Special case: If baseCurrency itself has numeric prefix, normalize it
+            if base_currency == '1000X':
+                return 'X'  # 1000X is actually X token with 1000x denomination
+            
             # Handle numeric prefixes in order (longest first)
             # Check for 1000000 prefix first
             if symbol.startswith('1000000'):
@@ -218,11 +226,18 @@ class KuCoinExchange(BaseExchange):
         Extract base asset from KuCoin symbol.
         
         Args:
-            symbol: KuCoin symbol (e.g., XBTUSDTM, ETHUSDTM, 1000BONKUSDTM, 10000CATUSDTM, 1000000MOGUSDTM)
+            symbol: KuCoin symbol (e.g., XBTUSDTM, ETHUSDTM, 1000BONKUSDTM, 10000CATUSDTM, 1000000MOGUSDTM, 1000XUSDTM, 1MBABYDOGEUSDTM)
             
         Returns:
-            Base asset (e.g., BTC, ETH, BONK, CAT, MOG)
+            Base asset (e.g., BTC, ETH, BONK, CAT, MOG, X, BABYDOGE)
         """
+        # Special case for 1MBABYDOGE (1M = 1 Million denomination)
+        if symbol.startswith('1MBABYDOGE'):
+            return 'BABYDOGE'
+        # Special case for 1000XUSDTM - should return 'X' not '1000X'
+        elif symbol in ['1000XUSDTM', '1000XUSDCM', '1000XUSDM']:
+            return 'X'
+        
         # Handle numeric prefixes in order (longest first)
         # Check for 1000000 prefix first
         if symbol.startswith('1000000'):

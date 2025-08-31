@@ -81,12 +81,20 @@ test_*.html
 # Logs
 logs/
 *.log
+data_collector.log
 
 # Temporary files
 *.tmp
 *.temp
 .tmp/
 .temp/
+temp_data.json
+
+# Status files
+*.status
+.backfill.status
+.unified_backfill.status
+.hyperliquid_backfill.status
 
 # Config files with sensitive data
 config.local.py

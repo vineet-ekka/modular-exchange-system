@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Line,
@@ -8,11 +8,15 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  ComposedChart
+  ComposedChart,
+  ReferenceLine
 } from 'recharts';
 import clsx from 'clsx';
 import LiveFundingTicker from '../Ticker/LiveFundingTicker';
 import FundingCountdown from '../Ticker/FundingCountdown';
+import FundingChartTooltip from '../Charts/FundingChartTooltip';
+import { preprocessChartData, calculateContractStats } from '../../utils/fundingChartUtils';
+import type { ProcessedFundingData } from '../../types/fundingChart';
 
 interface HistoricalDataPoint {
   timestamp: string;
@@ -32,32 +36,23 @@ interface HistoricalFundingViewProps {
   onUpdate?: () => void;
 }
 
-// Define colors for different contracts - expanded for multiple exchanges
-const CONTRACT_COLORS: Record<string, string> = {
-  // Binance contracts
-  'BTCUSDT': '#FFA726',      // Orange for USDT
-  'BTCUSDC': '#42A5F5',      // Blue for USDC
-  'BTCUSD_PERP': '#AB47BC',  // Purple for USD perpetual
-  'ETHUSDT': '#66BB6A',      // Green for ETH USDT
-  'ETHUSDC': '#26C6DA',      // Cyan for ETH USDC
-  
-  // Will be expanded for other exchanges
-  'DEFAULT': '#9E9E9E'       // Gray for others
-};
-
-// Helper to get color for a contract
+// Dynamic color assignment for contracts based on patterns
 const getContractColor = (symbol: string): string => {
-  // Check for exact match first
-  if (CONTRACT_COLORS[symbol]) {
-    return CONTRACT_COLORS[symbol];
+  // Pattern-based color assignment
+  if (symbol.endsWith('USDT')) return '#FFA726';      // Orange for USDT
+  if (symbol.endsWith('USDC')) return '#42A5F5';      // Blue for USDC
+  if (symbol.endsWith('USD_PERP') || symbol.endsWith('USD')) return '#AB47BC';  // Purple for USD perpetual
+  if (symbol.startsWith('ETH')) return '#66BB6A';     // Green for ETH pairs
+  if (symbol.startsWith('BTC')) return '#F7931A';     // Bitcoin orange
+  if (symbol.startsWith('XBT')) return '#F7931A';     // KuCoin Bitcoin
+  
+  // Generate a consistent color based on symbol hash
+  let hash = 0;
+  for (let i = 0; i < symbol.length; i++) {
+    hash = symbol.charCodeAt(i) + ((hash << 5) - hash);
   }
-  
-  // Check for pattern matches
-  if (symbol.endsWith('USDT')) return '#FFA726';
-  if (symbol.endsWith('USDC')) return '#42A5F5';
-  if (symbol.endsWith('USD_PERP') || symbol.endsWith('USD')) return '#AB47BC';
-  
-  return CONTRACT_COLORS['DEFAULT'];
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 70%, 50%)`;
 };
 
 
@@ -114,6 +109,8 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [fundingInterval, setFundingInterval] = useState<number>(8);
+  const [actualFundingTimes, setActualFundingTimes] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Handle clicks outside dropdown
@@ -214,8 +211,16 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
           });
         }
         
-        // Set combined data to just funding data (OI history removed)
-        setCombinedData(processedFundingData);
+        // Process data for step function visualization
+        if (selectedContract) {
+          const { processedData, fundingInterval: interval, actualFundingTimes: times } = 
+            preprocessChartData(processedFundingData, selectedContract);
+          setCombinedData(processedData as ChartDataPoint[]);
+          setFundingInterval(interval);
+          setActualFundingTimes(times);
+        } else {
+          setCombinedData(processedFundingData);
+        }
           
           
       }
@@ -256,12 +261,16 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historicalData.length]); // Only trigger when data actually changes, not onUpdate or loading
 
-  // Debug logging for rendering
+  // Process chart data when selected contract changes
   useEffect(() => {
-    console.log('State Update:', {
-      selectedContract: selectedContract
-    });
-  }, [selectedContract]);
+    if (selectedContract && historicalData.length > 0) {
+      const { processedData, fundingInterval: interval, actualFundingTimes: times } = 
+        preprocessChartData(historicalData, selectedContract);
+      setCombinedData(processedData as ChartDataPoint[]);
+      setFundingInterval(interval);
+      setActualFundingTimes(times);
+    }
+  }, [selectedContract, historicalData]);
 
   const exportToCSV = () => {
     if (historicalData.length === 0 || !selectedContract) return;
@@ -480,7 +489,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
           {/* Chart Section */}
           <div className="p-6 border-b border-light-border">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-700">APR Chart</h3>
+              <h3 className="text-lg font-medium text-gray-700">APR Chart (Step Function)</h3>
               <span className="text-xs text-gray-500">All times in UTC</span>
             </div>
             {!selectedContract ? (
@@ -511,64 +520,40 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
                     }}
                   />
                   <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#FFFFFF', 
-                      border: '1px solid #E5E7EB',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                    }}
-                    labelStyle={{ color: '#111827' }}
-                    content={(props) => {
-                      const { active, payload, label } = props;
-                      if (!active || !payload) return null;
-                      
-                      const dataPoint = payload[0]?.payload;
-                      
-                      // Custom tooltip showing selected contract values
-                      return (
-                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-lg">
-                          <p className="font-semibold text-gray-800 mb-2">{label}</p>
-                          {selectedContract && (() => {
-                            const aprValue = dataPoint?.[`${selectedContract}_apr`];
-                            const color = getContractColor(selectedContract);
-                            
-                            return (
-                              <div className="flex items-center justify-between gap-4 py-1">
-                                <span className="flex items-center gap-2">
-                                  <span 
-                                    className="w-3 h-0.5" 
-                                    style={{ backgroundColor: color }}
-                                  />
-                                  <span className="text-sm text-gray-600">{selectedContract}:</span>
-                                </span>
-                                <span className="text-sm font-medium">
-                                  {aprValue !== null && aprValue !== undefined 
-                                    ? `${aprValue.toFixed(2)}% APR` 
-                                    : 'N/A'}
-                                </span>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      );
-                    }}
+                    content={<FundingChartTooltip 
+                      contractName={selectedContract} 
+                      fundingInterval={fundingInterval}
+                    />}
                   />
                   <Legend 
                     wrapperStyle={{ paddingTop: '20px' }}
                     iconType="line"
                   />
                   
-                  {/* APR Line for selected contract */}
+                  {/* Vertical reference lines at actual funding times */}
+                  {actualFundingTimes.slice(0, 50).map((time, index) => (
+                    <ReferenceLine
+                      key={`funding-${index}`}
+                      x={time}
+                      stroke="#E5E7EB"
+                      strokeDasharray="3 3"
+                      strokeWidth={1}
+                    />
+                  ))}
+                  
+                  {/* APR Line for selected contract - Step Function */}
                   {selectedContract && (
                     <Line
                       key={selectedContract}
                       yAxisId="funding"
-                      type="monotone"
+                      type="stepAfter"
                       dataKey={`${selectedContract}_apr`}
                       stroke={getContractColor(selectedContract)}
                       strokeWidth={2}
                       dot={false}
-                      connectNulls={true}
+                      connectNulls={false}
+                      animationDuration={0}
+                      isAnimationActive={false}
                       name={selectedContract}
                     />
                   )}
@@ -623,15 +608,9 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
         <div className="px-6 py-4 border-t border-light-border bg-gray-50">
           <div className="flex justify-center text-sm">
             {selectedContract && (() => {
-              const contractData = historicalData
-                .map(d => d[`${selectedContract}_apr`])
-                .filter(v => v !== null && v !== undefined && typeof v === 'number') as number[];
+              const stats = calculateContractStats(historicalData, selectedContract);
               
-              if (contractData.length === 0) return null;
-              
-              const avg = contractData.reduce((a, b) => a + b, 0) / contractData.length;
-              const min = contractData.length > 0 ? Math.min(...contractData) : 0;
-              const max = contractData.length > 0 ? Math.max(...contractData) : 0;
+              if (stats.count === 0) return null;
               
               return (
                 <div className="bg-white p-4 rounded border border-gray-200 max-w-md">
@@ -640,34 +619,36 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
                       className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: getContractColor(selectedContract) }}
                     />
-                    <span className="font-medium text-gray-700">{selectedContract} Statistics</span>
+                    <span className="font-medium text-gray-700">
+                      {selectedContract} Statistics [{fundingInterval}h interval]
+                    </span>
                   </div>
                   <div className="grid grid-cols-3 gap-4 text-sm">
                     <div>
                       <span className="text-gray-500">Avg:</span>
                       <span className={clsx(
                         'ml-1 font-medium',
-                        avg > 0 ? 'text-green-600' : avg < 0 ? 'text-red-600' : 'text-gray-600'
+                        stats.avg > 0 ? 'text-green-600' : stats.avg < 0 ? 'text-red-600' : 'text-gray-600'
                       )}>
-                        {!isNaN(avg) && isFinite(avg) ? avg.toFixed(2) : '0.00'}%
+                        {stats.avg.toFixed(2)}%
                       </span>
                     </div>
                     <div>
                       <span className="text-gray-500">Min:</span>
                       <span className={clsx(
                         'ml-1 font-medium',
-                        min > 0 ? 'text-green-600' : min < 0 ? 'text-red-600' : 'text-gray-600'
+                        stats.min > 0 ? 'text-green-600' : stats.min < 0 ? 'text-red-600' : 'text-gray-600'
                       )}>
-                        {!isNaN(min) && isFinite(min) ? min.toFixed(2) : '0.00'}%
+                        {stats.min.toFixed(2)}%
                       </span>
                     </div>
                     <div>
                       <span className="text-gray-500">Max:</span>
                       <span className={clsx(
                         'ml-1 font-medium',
-                        max > 0 ? 'text-green-600' : max < 0 ? 'text-red-600' : 'text-gray-600'
+                        stats.max > 0 ? 'text-green-600' : stats.max < 0 ? 'text-red-600' : 'text-gray-600'
                       )}>
-                        {!isNaN(max) && isFinite(max) ? max.toFixed(2) : '0.00'}%
+                        {stats.max.toFixed(2)}%
                       </span>
                     </div>
                   </div>

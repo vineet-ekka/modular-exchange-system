@@ -6,6 +6,7 @@ import { fetchContractsByAsset, ContractDetails } from '../../services/api';
 interface ExchangeRate {
   funding_rate: number | null;
   apr: number | null;
+  funding_interval_hours?: number | null;
 }
 
 interface AssetGridData {
@@ -24,6 +25,8 @@ const AssetFundingGrid: React.FC = () => {
   const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
   const [contractsData, setContractsData] = useState<Record<string, ContractDetails[]>>({});
   const [loadingContracts, setLoadingContracts] = useState<Set<string>>(new Set());
+  const [autoExpandedAssets, setAutoExpandedAssets] = useState<Set<string>>(new Set());
+  const [allContractsLoaded, setAllContractsLoaded] = useState(false);
 
   // Fetch grid data
   useEffect(() => {
@@ -66,10 +69,95 @@ const AssetFundingGrid: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Filter data based on search
-  const filteredData = gridData.filter(item =>
-    item.asset.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Removed auto pre-fetch to prevent performance issues
+  // Contracts are now fetched on-demand when:
+  // 1. User expands an asset row
+  // 2. User searches for specific contracts
+  // This significantly reduces initial load time and API calls
+
+  // Smart fetching for search with debouncing
+  useEffect(() => {
+    if (!searchTerm || searchTerm.length < 2) {
+      return; // Don't fetch for very short searches
+    }
+
+    const fetchTimer = setTimeout(async () => {
+      // Only fetch contracts for assets that might match the search
+      const searchLower = searchTerm.toLowerCase();
+      const assetsToFetch = gridData
+        .filter(item => {
+          // Check if we need to fetch contracts for this asset
+          const assetMatches = item.asset.toLowerCase().includes(searchLower);
+          const alreadyFetched = !!contractsData[item.asset];
+          
+          // Fetch if asset name matches and we haven't fetched yet
+          // Or if the search term might match a contract symbol
+          return !alreadyFetched && (assetMatches || 
+            searchLower.includes('usdt') || 
+            searchLower.includes('usd') ||
+            searchLower.includes('perp'));
+        })
+        .slice(0, 20); // Limit to 20 assets at a time
+
+      // Fetch contracts for these assets
+      for (const item of assetsToFetch) {
+        if (!contractsData[item.asset]) {
+          try {
+            const contracts = await fetchContractsByAsset(item.asset);
+            setContractsData(prev => ({
+              ...prev,
+              [item.asset]: contracts
+            }));
+          } catch (error) {
+            console.error(`Error fetching contracts for ${item.asset}:`, error);
+          }
+        }
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(fetchTimer);
+  }, [searchTerm, gridData]);
+
+  // Filter data based on search - now includes contract search
+  const filteredData = gridData.filter(item => {
+    const searchLower = searchTerm.toLowerCase();
+    
+    // First check if asset name matches
+    if (item.asset.toLowerCase().includes(searchLower)) {
+      return true;
+    }
+    
+    // Then check if any contract matches
+    const contracts = contractsData[item.asset] || [];
+    const hasMatchingContract = contracts.some(contract => 
+      contract.symbol.toLowerCase().includes(searchLower) ||
+      contract.exchange.toLowerCase().includes(searchLower)
+    );
+    
+    return hasMatchingContract;
+  });
+
+  // Auto-expand assets when their contracts match the search
+  useEffect(() => {
+    if (searchTerm && contractsData) {
+      const assetsToExpand = new Set<string>();
+      
+      gridData.forEach(item => {
+        const contracts = contractsData[item.asset] || [];
+        const hasMatchingContract = contracts.some(contract =>
+          contract.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+        
+        if (hasMatchingContract && !item.asset.toLowerCase().includes(searchTerm.toLowerCase())) {
+          assetsToExpand.add(item.asset);
+        }
+      });
+      
+      setAutoExpandedAssets(assetsToExpand);
+    } else {
+      setAutoExpandedAssets(new Set());
+    }
+  }, [searchTerm, contractsData, gridData]);
 
   // Sort data
   const sortedData = [...filteredData].sort((a, b) => {
@@ -140,6 +228,15 @@ const AssetFundingGrid: React.FC = () => {
   const formatRate = (rate: number | null) => {
     if (rate === null || rate === undefined) return '-';
     return `${(rate * 100).toFixed(4)}%`;
+  };
+
+  const formatInterval = (hours: number | null | undefined) => {
+    if (!hours) return '-';
+    if (hours === 1) return '1h';
+    if (hours === 2) return '2h';
+    if (hours === 4) return '4h';
+    if (hours === 8) return '8h';
+    return `${hours}h`;
   };
 
   const getRateColor = (rate: number | null) => {
@@ -230,14 +327,14 @@ const AssetFundingGrid: React.FC = () => {
               Refresh
             </button>
             <span className="text-sm text-text-secondary">
-              {sortedData.length} assets on Binance
+              {sortedData.length} assets{searchTerm && autoExpandedAssets.size > 0 ? ` (${autoExpandedAssets.size} with matching contracts)` : ''}
             </span>
             <input
               type="text"
-              placeholder="Search assets..."
+              placeholder="Search assets or contracts..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="px-3 py-1 bg-white border border-light-border rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue"
+              className="px-3 py-1.5 bg-white border border-light-border rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue w-64"
             />
           </div>
         </div>
@@ -278,11 +375,16 @@ const AssetFundingGrid: React.FC = () => {
                   <td className="px-4 py-3 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-light-border">
                     <div className="flex items-center space-x-2">
                       <span className="text-gray-400 text-xs">
-                        {expandedAssets.has(item.asset) ? '▼' : '▶'}
+                        {expandedAssets.has(item.asset) || autoExpandedAssets.has(item.asset) ? '▼' : '▶'}
                       </span>
                       <span className="text-sm font-medium text-text-primary">
                         {item.asset}
                       </span>
+                      {autoExpandedAssets.has(item.asset) && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                          Contract Match
+                        </span>
+                      )}
                     </div>
                   </td>
                   {exchanges.map(exchange => {
@@ -302,7 +404,7 @@ const AssetFundingGrid: React.FC = () => {
                     );
                   })}
                 </tr>
-                {expandedAssets.has(item.asset) && (
+                {(expandedAssets.has(item.asset) || autoExpandedAssets.has(item.asset)) && (
                   <tr className="expand-animation">
                     <td colSpan={exchanges.length + 1} className="p-0">
                       <div className="bg-gray-50 border-t border-b border-gray-200">
@@ -320,6 +422,7 @@ const AssetFundingGrid: React.FC = () => {
                                   <th className="px-3 py-2 text-left font-medium text-gray-700">Exchange Name</th>
                                   <th className="px-3 py-2 text-left font-medium text-gray-700">Base Asset</th>
                                   <th className="px-3 py-2 text-left font-medium text-gray-700">Quote Asset</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Interval</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700">Funding Rate</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700">APR</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Open Interest</th>
@@ -328,12 +431,32 @@ const AssetFundingGrid: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200">
-                                {contractsData[item.asset].map((contract, idx) => (
-                                  <tr key={`${contract.exchange}-${contract.symbol}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                                    <td className="px-3 py-2 font-medium text-gray-900">{contract.symbol}</td>
-                                    <td className="px-3 py-2 text-gray-700">{contract.exchange}</td>
+                                {contractsData[item.asset].map((contract, idx) => {
+                                  const searchLower = searchTerm.toLowerCase();
+                                  const isContractMatch = searchTerm && (
+                                    contract.symbol.toLowerCase().includes(searchLower) ||
+                                    contract.exchange.toLowerCase().includes(searchLower)
+                                  );
+                                  
+                                  return (
+                                  <tr key={`${contract.exchange}-${contract.symbol}`} 
+                                      className={clsx(
+                                        idx % 2 === 0 ? 'bg-white' : 'bg-gray-50',
+                                        isContractMatch && 'ring-2 ring-blue-400 ring-opacity-50'
+                                      )}>
+                                    <td className={clsx(
+                                      "px-3 py-2 font-medium",
+                                      isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"
+                                    )}>{contract.symbol}</td>
+                                    <td className={clsx(
+                                      "px-3 py-2",
+                                      isContractMatch && contract.exchange.toLowerCase().includes(searchLower) ? "text-blue-700 font-semibold" : "text-gray-700"
+                                    )}>{contract.exchange}</td>
                                     <td className="px-3 py-2 text-gray-700">{contract.base_asset}</td>
                                     <td className="px-3 py-2 text-gray-700">{contract.quote_asset}</td>
+                                    <td className="px-3 py-2 text-center font-medium text-gray-700">
+                                      {formatInterval(contract.funding_interval_hours)}
+                                    </td>
                                     <td className={clsx(
                                       'px-3 py-2 text-center font-medium',
                                       contract.funding_rate > 0 ? 'text-green-600' : contract.funding_rate < 0 ? 'text-red-600' : 'text-gray-500'
@@ -356,7 +479,8 @@ const AssetFundingGrid: React.FC = () => {
                                       {formatPrice(contract.index_price)}
                                     </td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                             <div className="mt-3 text-center">
