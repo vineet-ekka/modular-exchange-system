@@ -19,6 +19,7 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
   const [countdownData, setCountdownData] = useState<CountdownData | null>(null);
   const [currentTime, setCurrentTime] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [hasReachedZero, setHasReachedZero] = useState(false);
 
   const fetchCountdownData = async () => {
     try {
@@ -77,6 +78,7 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
                 display: `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
               }
             });
+            setHasReachedZero(false);  // Reset the flag when we get new data
             setLoading(false);
             return;
           }
@@ -93,6 +95,7 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
           next_funding_time: data.next_funding_time,
           time_until_funding: data.time_until_funding
         });
+        setHasReachedZero(false);  // Reset the flag when we get new data
       }
     } catch (err) {
       console.error('Error fetching countdown data:', err);
@@ -124,10 +127,19 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
         const seconds = Math.floor((diff % (1000 * 60)) / 1000);
         
         setCurrentTime(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
-      } else {
+        // Reset the flag if we're back to positive time
+        if (hasReachedZero) {
+          setHasReachedZero(false);
+        }
+      } else if (!hasReachedZero) {
+        // When countdown reaches zero for the first time
         setCurrentTime('00:00:00');
-        // Refresh data when funding time is reached
+        setHasReachedZero(true);
+        // Fetch new data immediately
         fetchCountdownData();
+      } else {
+        // Keep showing 00:00:00 while waiting for new data
+        setCurrentTime('00:00:00');
       }
     };
 
@@ -135,7 +147,7 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
     const countInterval = setInterval(updateCountdown, 1000);
 
     return () => clearInterval(countInterval);
-  }, [countdownData]);
+  }, [countdownData, hasReachedZero]);
 
   if (loading) {
     return (

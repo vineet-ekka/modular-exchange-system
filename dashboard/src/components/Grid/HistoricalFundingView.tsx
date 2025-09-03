@@ -1,21 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ComposedChart,
-  ReferenceLine
-} from 'recharts';
+// Chart components removed - table view only
 import clsx from 'clsx';
 import LiveFundingTicker from '../Ticker/LiveFundingTicker';
-import FundingCountdown from '../Ticker/FundingCountdown';
-import FundingChartTooltip from '../Charts/FundingChartTooltip';
-import { preprocessChartData, calculateContractStats } from '../../utils/fundingChartUtils';
+// FundingChartTooltip removed - no longer using charts
+import { calculateContractStats } from '../../utils/fundingChartUtils';
 import type { ProcessedFundingData } from '../../types/fundingChart';
 
 interface HistoricalDataPoint {
@@ -211,15 +200,14 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
           });
         }
         
-        // Process data for step function visualization
-        if (selectedContract) {
-          const { processedData, fundingInterval: interval, actualFundingTimes: times } = 
-            preprocessChartData(processedFundingData, selectedContract);
-          setCombinedData(processedData as ChartDataPoint[]);
+        // Use raw data directly for smooth line visualization
+        setCombinedData(processedFundingData);
+        
+        // Extract funding interval from the first data point if available
+        if (selectedContract && processedFundingData.length > 0) {
+          // Try to determine funding interval from the data
+          const interval = 8; // Default to 8 hours, can be extracted from metadata if available
           setFundingInterval(interval);
-          setActualFundingTimes(times);
-        } else {
-          setCombinedData(processedFundingData);
         }
           
           
@@ -261,14 +249,25 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historicalData.length]); // Only trigger when data actually changes, not onUpdate or loading
 
-  // Process chart data when selected contract changes
+  // Update combined data when selected contract or historical data changes
   useEffect(() => {
-    if (selectedContract && historicalData.length > 0) {
-      const { processedData, fundingInterval: interval, actualFundingTimes: times } = 
-        preprocessChartData(historicalData, selectedContract);
-      setCombinedData(processedData as ChartDataPoint[]);
-      setFundingInterval(interval);
-      setActualFundingTimes(times);
+    if (historicalData.length > 0) {
+      // Ensure rawTimestamp is always defined for ChartDataPoint type
+      const chartData = historicalData.map(item => ({
+        ...item,
+        rawTimestamp: item.rawTimestamp || item.timestamp
+      })) as ChartDataPoint[];
+      setCombinedData(chartData);
+      
+      // Debug: Log the data to see what's being charted
+      if (selectedContract && chartData.length > 0) {
+        console.log('Chart data for', selectedContract, ':', {
+          firstPoint: chartData[0][selectedContract],
+          firstAPR: chartData[0][`${selectedContract}_apr`],
+          dataKey: selectedContract,
+          sample: chartData.slice(0, 3)
+        });
+      }
     }
   }, [selectedContract, historicalData]);
 
@@ -374,9 +373,8 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
           </div>
           
           {/* Live Ticker and Countdown Row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="mt-4">
             <LiveFundingTicker asset={asset} selectedContract={selectedContract} />
-            <FundingCountdown asset={asset} selectedContract={selectedContract} />
           </div>
         </div>
 
@@ -445,24 +443,6 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
               )}
             </div>
 
-            {/* Time Range Selector */}
-            <div className="flex space-x-2">
-              {[1, 7, 30].map(days => (
-                <button
-                  key={days}
-                  onClick={() => setTimeRange(days)}
-                  className={clsx(
-                    'px-3 py-1 rounded text-sm',
-                    timeRange === days
-                      ? 'bg-text-primary text-white'
-                      : 'bg-white text-text-secondary hover:bg-gray-100 border border-light-border'
-                  )}
-                >
-                  {days}D
-                </button>
-              ))}
-            </div>
-            
             <div className="text-xs text-gray-500">
               Last updated: {lastUpdate.toLocaleTimeString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}
             </div>
@@ -484,116 +464,58 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
           </div>
         </div>
 
-        {/* Chart and Table Content - Both Visible */}
+        {/* Table Content Only */}
         <div className="bg-white">
-          {/* Chart Section */}
-          <div className="p-6 border-b border-light-border">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-gray-700">APR Chart (Step Function)</h3>
-              <span className="text-xs text-gray-500">All times in UTC</span>
-            </div>
-            {!selectedContract ? (
-              <div className="flex items-center justify-center h-64 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Please select a contract to display the chart</p>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={400}>
-                <ComposedChart data={combinedData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis 
-                    dataKey="timestamp" 
-                    stroke="#9CA3AF"
-                    tick={{ fontSize: 12, fill: '#6B7280' }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={60}
-                  />
-                  <YAxis 
-                    yAxisId="funding"
-                    stroke="#9CA3AF"
-                    tick={{ fontSize: 12, fill: '#6B7280' }}
-                    label={{ 
-                      value: 'APR (%)', 
-                      angle: -90, 
-                      position: 'insideLeft',
-                      style: { fill: '#6b7280' }
-                    }}
-                  />
-                  <Tooltip 
-                    content={<FundingChartTooltip 
-                      contractName={selectedContract} 
-                      fundingInterval={fundingInterval}
-                    />}
-                  />
-                  <Legend 
-                    wrapperStyle={{ paddingTop: '20px' }}
-                    iconType="line"
-                  />
-                  
-                  {/* Vertical reference lines at actual funding times */}
-                  {actualFundingTimes.slice(0, 50).map((time, index) => (
-                    <ReferenceLine
-                      key={`funding-${index}`}
-                      x={time}
-                      stroke="#E5E7EB"
-                      strokeDasharray="3 3"
-                      strokeWidth={1}
-                    />
-                  ))}
-                  
-                  {/* APR Line for selected contract - Step Function */}
-                  {selectedContract && (
-                    <Line
-                      key={selectedContract}
-                      yAxisId="funding"
-                      type="stepAfter"
-                      dataKey={`${selectedContract}_apr`}
-                      stroke={getContractColor(selectedContract)}
-                      strokeWidth={2}
-                      dot={false}
-                      connectNulls={false}
-                      animationDuration={0}
-                      isAnimationActive={false}
-                      name={selectedContract}
-                    />
-                  )}
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          
           {/* Table Section */}
           <div className="p-6">
-            <h3 className="text-lg font-medium text-gray-700 mb-4">APR History</h3>
+            <h3 className="text-lg font-medium text-gray-700 mb-4">Funding Rate History</h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-text-secondary font-medium">Timestamp (UTC)</th>
                     {selectedContract && (
-                      <th className="px-4 py-2 text-center text-text-secondary font-medium">
-                        {selectedContract} (APR %)
-                      </th>
+                      <>
+                        <th className="px-4 py-2 text-center text-text-secondary font-medium">
+                          {selectedContract} Funding Rate (%)
+                        </th>
+                        <th className="px-4 py-2 text-center text-text-secondary font-medium">
+                          APR (%)
+                        </th>
+                      </>
                     )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-light-border">
-                  {historicalData.map((item, index) => (
+                  {[...historicalData].reverse().map((item, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-4 py-2 text-text-secondary">{item.timestamp}</td>
                       {selectedContract && (() => {
+                        const fundingValue = item[selectedContract];
                         const aprValue = item[`${selectedContract}_apr`];
                         return (
-                          <td
-                            className={clsx(
-                              'px-4 py-2 text-center',
-                              aprValue !== null && aprValue !== undefined && aprValue > 0 ? 'text-funding-positive' :
-                              aprValue !== null && aprValue !== undefined && aprValue < 0 ? 'text-funding-negative' :
-                              'text-funding-neutral'
-                            )}
-                          >
-                            {aprValue !== null && aprValue !== undefined && !isNaN(aprValue as number) ? `${(aprValue as number).toFixed(2)}%` : '-'}
-                          </td>
+                          <>
+                            <td
+                              className={clsx(
+                                'px-4 py-2 text-center',
+                                fundingValue !== null && fundingValue !== undefined && fundingValue > 0 ? 'text-funding-positive' :
+                                fundingValue !== null && fundingValue !== undefined && fundingValue < 0 ? 'text-funding-negative' :
+                                'text-funding-neutral'
+                              )}
+                            >
+                              {fundingValue !== null && fundingValue !== undefined && !isNaN(fundingValue as number) ? `${(fundingValue as number).toFixed(4)}%` : '-'}
+                            </td>
+                            <td
+                              className={clsx(
+                                'px-4 py-2 text-center',
+                                aprValue !== null && aprValue !== undefined && aprValue > 0 ? 'text-funding-positive' :
+                                aprValue !== null && aprValue !== undefined && aprValue < 0 ? 'text-funding-negative' :
+                                'text-funding-neutral'
+                              )}
+                            >
+                              {aprValue !== null && aprValue !== undefined && !isNaN(aprValue as number) ? `${(aprValue as number).toFixed(2)}%` : '-'}
+                            </td>
+                          </>
                         );
                       })()}
                     </tr>

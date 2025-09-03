@@ -428,6 +428,7 @@ const AssetFundingGrid: React.FC = () => {
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Open Interest</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Mark Price</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Index Price</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Actions</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200">
@@ -478,6 +479,17 @@ const AssetFundingGrid: React.FC = () => {
                                     <td className="px-3 py-2 text-right text-gray-700">
                                       {formatPrice(contract.index_price)}
                                     </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          navigate(`/historical/${contract.exchange}/${contract.symbol}`);
+                                        }}
+                                        className="text-xs text-blue-500 hover:text-blue-700 underline"
+                                      >
+                                        History
+                                      </button>
+                                    </td>
                                   </tr>
                                   );
                                 })}
@@ -487,11 +499,18 @@ const AssetFundingGrid: React.FC = () => {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate(`/asset/${item.asset}`);
+                                  // Navigate to the first contract's history if available
+                                  if (contractsData[item.asset] && contractsData[item.asset].length > 0) {
+                                    const firstContract = contractsData[item.asset][0];
+                                    navigate(`/historical/${firstContract.exchange}/${firstContract.symbol}`);
+                                  } else {
+                                    // Fallback to asset view
+                                    navigate(`/asset/${item.asset}`);
+                                  }
                                 }}
                                 className="text-sm text-blue-500 hover:text-blue-700 underline"
                               >
-                                View History
+                                View All History
                               </button>
                             </div>
                           </div>

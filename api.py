@@ -20,6 +20,7 @@ import signal
 from pathlib import Path
 from dotenv import load_dotenv
 from config.settings_manager import SettingsManager
+from database.postgres_manager import PostgresManager
 
 # Load environment variables
 load_dotenv()
@@ -826,6 +827,108 @@ async def get_historical_funding_by_asset(
         cur.close()
         conn.close()
 
+@app.get("/api/historical-funding-by-contract/{exchange}/{symbol}")
+async def get_historical_funding_by_contract(
+    exchange: str,
+    symbol: str,
+    days: int = Query(7, ge=1, le=30)
+):
+    """
+    Get historical funding rates for a specific contract.
+    Returns clean data for a single contract without mixing different funding intervals.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Calculate date range
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timedelta(days=days)
+        
+        # Get historical data for this specific contract
+        query_historical = """
+            SELECT 
+                exchange,
+                symbol,
+                base_asset,
+                funding_rate,
+                funding_rate * (365.0 * 24 / COALESCE(funding_interval_hours, 8)) * 100 as apr,
+                funding_time,
+                funding_interval_hours,
+                mark_price
+            FROM funding_rates_historical
+            WHERE exchange = %s 
+                AND symbol = %s
+                AND funding_time >= %s
+                AND funding_time <= %s
+            ORDER BY funding_time DESC
+        """
+        cur.execute(query_historical, (exchange, symbol, start_date, end_date))
+        historical_results = cur.fetchall()
+        
+        # Also get the most recent data from main table
+        query_recent = """
+            SELECT 
+                exchange,
+                symbol,
+                base_asset,
+                funding_rate,
+                apr,
+                last_updated as funding_time,
+                funding_interval_hours,
+                mark_price,
+                open_interest
+            FROM exchange_data
+            WHERE exchange = %s 
+                AND symbol = %s
+            LIMIT 1
+        """
+        cur.execute(query_recent, (exchange, symbol))
+        recent_result = cur.fetchone()
+        
+        # Combine results
+        results = list(historical_results) if historical_results else []
+        
+        # Add recent data if it's newer than historical
+        if recent_result:
+            if not results or recent_result['funding_time'] > results[0]['funding_time']:
+                results.insert(0, recent_result)
+        
+        # Format data for frontend
+        chart_data = []
+        base_asset = None
+        funding_interval = 8
+        
+        for row in results:
+            if not base_asset and row.get('base_asset'):
+                base_asset = row['base_asset']
+            if row.get('funding_interval_hours'):
+                funding_interval = int(row['funding_interval_hours'])
+                
+            chart_data.append({
+                'timestamp': row['funding_time'].isoformat() if row['funding_time'] else None,
+                'funding_rate': float(row['funding_rate']) if row['funding_rate'] is not None else None,
+                'apr': float(row['apr']) if row['apr'] is not None else None,
+                'mark_price': float(row['mark_price']) if row['mark_price'] is not None else None,
+                'open_interest': float(row['open_interest']) if row.get('open_interest') is not None else None
+            })
+        
+        return {
+            'exchange': exchange,
+            'symbol': symbol,
+            'base_asset': base_asset,
+            'funding_interval_hours': funding_interval,
+            'days': days,
+            'data_points': len(chart_data),
+            'data': chart_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
 @app.get("/api/current-funding/{asset}")
 async def get_current_funding(asset: str):
     """
@@ -1286,6 +1389,7 @@ async def stop_backfill():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

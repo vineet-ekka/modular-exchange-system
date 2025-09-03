@@ -1,21 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import Header from '../components/Layout/Header';
-import HistoricalFundingView from '../components/Grid/HistoricalFundingView';
+import HistoricalFundingViewContract from '../components/Grid/HistoricalFundingViewContract';
 
 function HistoricalFundingPage() {
-  const { asset } = useParams<{ asset: string }>();
+  const { asset, exchange, symbol } = useParams<{ asset?: string; exchange?: string; symbol?: string }>();
   const navigate = useNavigate();
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  // If no asset is provided, redirect to dashboard
+  // Determine if this is asset-based or contract-based routing
+  const isContractView = !!(exchange && symbol);
+
+  // If no params provided, redirect to dashboard
   useEffect(() => {
-    if (!asset) {
+    if (!asset && !isContractView) {
       navigate('/');
     }
-  }, [asset, navigate]);
+  }, [asset, isContractView, navigate]);
 
-  if (!asset) {
+  if (!asset && !isContractView) {
     return null;
   }
 
@@ -34,12 +37,26 @@ function HistoricalFundingPage() {
               Dashboard
             </Link>
             <span className="text-text-muted">/</span>
-            <span className="text-text-primary font-medium">{asset}</span>
+            {isContractView ? (
+              <>
+                <span className="text-text-secondary">{exchange}</span>
+                <span className="text-text-muted">/</span>
+                <span className="text-text-primary font-medium">{symbol}</span>
+              </>
+            ) : (
+              <span className="text-text-primary font-medium">{asset}</span>
+            )}
           </nav>
         </div>
 
         {/* Historical Funding View Component */}
-        <HistoricalFundingView asset={asset} onUpdate={() => setLastUpdate(new Date())} />
+        <HistoricalFundingViewContract 
+          asset={asset} 
+          exchange={exchange}
+          symbol={symbol}
+          isContractView={isContractView}
+          onUpdate={() => setLastUpdate(new Date())} 
+        />
       </main>
     </div>
   );

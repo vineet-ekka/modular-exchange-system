@@ -12,6 +12,9 @@ function App() {
       <BackfillProgress />
       <Routes>
         <Route path="/" element={<DashboardPage />} />
+        {/* New contract-specific routes */}
+        <Route path="/historical/:exchange/:symbol" element={<HistoricalFundingPage />} />
+        {/* Keep old routes for backward compatibility */}
         <Route path="/historical/:asset" element={<HistoricalFundingPage />} />
         <Route path="/asset/:asset" element={<HistoricalFundingPage />} />
         <Route path="/settings" element={<SettingsPage />} />
