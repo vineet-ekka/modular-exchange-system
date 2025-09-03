@@ -236,10 +236,13 @@ cd modular-exchange-system
 ```bash
 # Python dependencies
 pip install -r requirements.txt
-pip install fastapi uvicorn psutil  # Additional required packages
+pip install fastapi uvicorn psutil scipy black  # Additional required packages
 
 # Dashboard dependencies
 cd dashboard && npm install && cd ..
+
+# For Z-Score implementation (in progress)
+cd dashboard && npm install react-window react-window-infinite-loader @types/react-window && cd ..
 ```
 
 #### 3. Start PostgreSQL
@@ -425,13 +428,13 @@ Response:
   - Highlights matching contracts in blue
 - **Sorting**: Multi-column sorting with indicators
 
-### Historical Charts
-- **Time Ranges**: 1D, 7D, 30D views
-- **Multi-Contract**: Compare multiple contracts
+### Historical Data View
+- **Table Display**: Clean tabular presentation of funding rate history
+- **Latest First**: Historical data ordered from most recent to oldest
+- **Multi-Contract**: View data for multiple contracts per asset
 - **APR Display**: Annualized rates for comparison
-- **Step Function Display**: Accurate representation of funding rate changes
-- **Interactive**: Enhanced tooltips with funding intervals and change indicators
-- **Reference Lines**: Visual markers at actual funding update times
+- **Contract Selection**: Dropdown selector for specific contract views
+- **Live Updates**: Real-time ticker showing current rates
 - **Export**: Download data as CSV
 
 ### Real-time Monitoring
@@ -525,8 +528,7 @@ modular_exchange_system/
 │   └── data_validator.py          # Data validation
 │
 ├── database_tools.py              # Consolidated database utilities
-├── shutdown_dashboard.py          # Clean shutdown utility
-└── zzz_revised.md                 # Z-score implementation specification
+└── shutdown_dashboard.py          # Clean shutdown utility
 ```
 
 ## 💾 Database Schema
@@ -791,6 +793,16 @@ elif funding_interval_hours == 8:
 - X-axis improvements for charts
 - Performance optimizations
 
+#### Phase 30: Z-Score Statistical Monitoring (2025-09-03 - In Progress)
+- **Statistical Analysis**: Implementing Z-score calculations for funding rates
+- **New Database Table**: `funding_statistics` with 30-day rolling statistics
+- **Flat Contract Display**: 1,240 contracts in single list with virtual scrolling
+- **React-Window Integration**: Performance optimization for large dataset
+- **Blue-Orange Heat Map**: Statistical deviation visualization (no red/green)
+- **Dynamic Row Heights**: 40px standard, 120px for extreme deviations (|Z| ≥ 2.0)
+- **API Endpoint**: `/api/contracts-with-zscores` for flat contract list
+- **Percentile Rankings**: Distribution-independent statistical measures
+
 ### Critical Fixes Implemented
 1. **Funding Interval Detection**: Fixed 333 contracts with incorrect APR
 2. **Multi-Contract Chart Alignment**: Timestamp normalization
@@ -1026,10 +1038,10 @@ python scripts/unified_historical_backfill.py --days 30 --exchanges binance kuco
 
 ---
 
-*Last Updated: 2025-08-31*
-*Version: 1.5.3*
+*Last Updated: 2025-09-03*
+*Version: 1.6.0*
 *Total Contracts: 1,240*
 *Active Exchanges: 4*
 *Unique Assets: 600+*
 *Project Status: Production Ready*
-*Recent Updates: Project cleanup, improved documentation, removed redundant files*
+*Current Development: Z-Score statistical monitoring implementation*

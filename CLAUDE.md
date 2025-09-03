@@ -11,6 +11,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. Only proceed with deletion after receiving a second, clear confirmation
 4. Documentation files (*.md), specification files, and tasklists are NOT temporary files
 
+### Commit Policy
+**NEVER commit changes unless the user explicitly asks you to.** It is VERY IMPORTANT to only commit when explicitly asked, otherwise the user will feel that you are being too proactive.
+
+### File Creation Policy
+- ALWAYS prefer editing existing files in the codebase
+- NEVER write new files unless explicitly required
+- NEVER proactively create documentation files (*.md) or README files unless explicitly requested
+
+### Code Modification Policy
+- ALWAYS read files before editing them using the Read tool
+- NEVER make assumptions about file contents - read them first
+- When modifying TypeScript files, ensure type checking passes: `cd dashboard && npx tsc --noEmit`
+- When modifying Python files, verify imports are correct and available
+
 ## Quick Start
 
 ```bash
@@ -317,76 +331,60 @@ with db.get_connection() as conn:
         print(f"Total records: {count}")
 ```
 
-## Known Issues and Solutions
+## Troubleshooting Guide
 
-### Dashboard Polling
-The dashboard continuously polls the API every 30 seconds by design for real-time updates. This is not a bug but a feature to show live funding rates.
-
-### Multiple Dashboard Instances
-If you see "Something is already running on port 3000", a dashboard instance is already running. Check with `netstat -ano | findstr :3000` (Windows) or `lsof -i :3000` (Linux/Mac).
-
-## Troubleshooting
-
-### Common Windows Issues
+### System Not Starting
 ```bash
-# If curl not available on Windows, use:
-python -c "import requests; print(requests.get('http://localhost:8000/api/health').json())"
+# Check if PostgreSQL is running
+docker ps | findstr postgres  # Windows
+docker ps | grep postgres      # Linux/Mac
 
-# Check if ports are in use (Windows)
-netstat -ano | findstr :8000
-netstat -ano | findstr :3000
+# If not running, start it
+docker-compose up -d postgres
 
-# Alternative to tail -f on Windows
-Get-Content data_collector.log -Wait -Tail 20
+# If ports are blocked
+netstat -ano | findstr :8000  # Check API port
+netstat -ano | findstr :3000  # Check dashboard port
+taskkill /PID <pid> /F         # Kill blocking process (Windows)
 ```
 
 ### No Data Showing
 ```bash
-# Windows
-docker ps | findstr postgres
-curl -s http://localhost:8000/api/funding-rates-grid
-type data_collector.log
+# Check PostgreSQL is running
+docker ps  # Should show exchange_postgres
 
-# Linux/Mac
-docker ps | grep postgres
-curl -s http://localhost:8000/api/funding-rates-grid
-cat data_collector.log
-```
+# Test data collection
+python main.py
 
-### Port Already in Use
-```bash
-# Windows
-netstat -ano | findstr :8000
-taskkill /PID <pid> /F
+# Verify API is working
+curl http://localhost:8000/api/funding-rates-grid  # Linux/Mac
+python -c "import requests; print(requests.get('http://localhost:8000/api/health').json())"  # Windows
 
-# Linux/Mac
-lsof -i :8000
-kill -9 <pid>
+# Check collector log
+type data_collector.log  # Windows
+cat data_collector.log   # Linux/Mac
 ```
 
 ### Data Collector Issues
 ```bash
-# Check log for errors
-type data_collector.log  # Windows
-cat data_collector.log   # Linux/Mac
-
 # Manual start with debug output
 python main.py --loop --interval 30
 
 # Test specific exchange
 python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(e.fetch_data())"
+
+# Check background process (Claude Code)
+/bashes
+BashOutput tool with bash_id="<id>"
 ```
 
-### Database Connection Issues
+### Database Issues
 ```bash
 # Test connection
 python database_tools.py check
 
 # Restart PostgreSQL
 docker-compose restart postgres
-
-# View PostgreSQL logs
-docker-compose logs postgres
 
 # Reset database (careful!)
 python database_tools.py clear --quick
@@ -395,32 +393,20 @@ python database_tools.py init
 
 ### Stuck Backfill
 ```bash
-# Remove status file
+# Remove lock file
 del .unified_backfill.status  # Windows
 rm .unified_backfill.status   # Linux/Mac
 
-# Check status via API
-curl http://localhost:8000/api/backfill-status
-
-# Force restart backfill
+# Force restart via API
 curl -X POST http://localhost:8000/api/backfill/stop
 curl -X POST http://localhost:8000/api/backfill/start
 ```
 
-### Dashboard Not Updating
-```bash
-# Check API health
-curl http://localhost:8000/api/health
-
-# Check for TypeScript errors
-cd dashboard && npx tsc --noEmit
-
-# Rebuild dashboard
-cd dashboard && npm run build
-
-# Clear browser cache and reload
-# Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (Mac)
-```
+### Dashboard Issues
+- **Port 3000 in use**: Check `netstat -ano | findstr :3000`
+- **Not updating**: Dashboard polls every 30s by design (not a bug)
+- **TypeScript errors**: Run `cd dashboard && npx tsc --noEmit`
+- **Clear cache**: Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (Mac)
 
 ## Performance Optimization
 
@@ -489,6 +475,7 @@ npm install
 
 ## Files to Never Commit
 - `.unified_backfill.status`, `.backfill.status` - Backfill progress tracking
+- `.unified_backfill.lock` - Backfill lock file
 - `data_collector.log` - Collector output (can grow large)
 - `temp_data.json` - Temporary data storage
 - `.env` - Environment secrets (use .env.example as template)
@@ -503,6 +490,7 @@ When creating commits:
 2. Format Python code: `black . --line-length=120` (if installed)
 3. Test critical functionality: `python database_tools.py check`
 4. Use batch git commands: `git status`, `git diff`, `git log`
+5. **NEVER commit unless explicitly asked by the user**
 
 ## Testing Individual Components
 
@@ -549,6 +537,33 @@ with db.get_connection() as conn:
 "
 ```
 
+## Common Pitfalls & Patterns
+
+### Exchange Data Normalization
+All exchanges have specific normalization patterns for base assets that MUST be handled:
+- **Binance**: `1000SHIB` → `SHIB`, `1000000MOG` → `MOG`, `1MBABYDOGE` → `BABYDOGE`
+- **KuCoin**: `1000X` → `X` (special case), `XBTUSDTM` → `BTC`, numeric prefixes
+- **Backpack/Hyperliquid**: `kPEPE` → `PEPE` (k-prefix tokens)
+
+### Database Patterns
+- **ALWAYS use UPSERT**: Prevents duplicates with ON CONFLICT clauses
+- **Use indexed columns**: (exchange, symbol) for WHERE clauses
+- **Connection pooling**: Already configured in `database/postgres_manager.py`
+- **Real-time table**: Cleared and repopulated every 30 seconds
+- **Historical table**: Uses unique constraint on (exchange, symbol, funding_time)
+
+### React Dashboard Patterns
+- **Polling intervals**: All components poll every 30 seconds to sync with collector
+- **Search optimization**: Use debounced search (300ms delay already configured)
+- **Performance**: Components use React.memo, lazy loading for contracts
+- **Type safety**: All API responses need proper TypeScript interfaces
+
+### API Endpoint Patterns
+- **Asset vs Symbol**: Assets are normalized (BTC), symbols are exchange-specific (BTCUSDT)
+- **Grid endpoints**: Return aggregated data by asset with contract lists
+- **Historical endpoints**: Support time ranges (1D, 7D, 30D) via query params
+- **Error responses**: Always return proper HTTP status codes with error messages
+
 ## Available Scripts
 
 ### Main Scripts
@@ -575,3 +590,66 @@ with db.get_connection() as conn:
 - Dashboard components intentionally poll every 30 seconds for real-time data
 - This matches the data collector's 30-second update cycle
 - Polling intervals: Main grid (30s), Stats (30s), Live ticker (30s), Historical views (30s)
+
+## Important Behavioral Notes
+
+### TypeScript Type Checking
+- TypeScript type check (`npx tsc --noEmit`) MUST pass before committing
+- Dashboard uses TypeScript 4.9.5 with strict type checking
+- Common type issues to watch for:
+  - Missing type definitions for API responses
+  - Incorrect prop types in React components
+  - Undefined variable access
+
+### Exchange-Specific Considerations
+- **Binance**: Returns most contracts, handle rate limits carefully
+- **KuCoin**: Special symbol normalization (XBTUSDTM → BTC)
+- **Hyperliquid**: Hourly funding intervals (not 8-hour)
+- **Backpack**: Limited contracts but fast API
+- **Kraken**: Returns futures data in unique format
+
+### Database Performance
+- Real-time table is cleared and repopulated every update cycle
+- Historical table can grow large (269,381+ records)
+- Indexes are critical for query performance
+- Use UPSERT pattern to prevent duplicates
+
+### Error Handling Patterns
+- All exchange modules should handle network errors gracefully
+- Return empty list on API failure, don't crash
+- Log errors to console but continue operation
+- Dashboard shows "No data" message when API fails
+
+## Current Development Focus
+
+### Z-Score Statistical Monitoring (In Progress)
+Implementing statistical analysis for funding rates as specified in `Z_score.md`:
+- **Component**: New `ContractZScoreGrid.tsx` (do NOT modify AssetFundingGrid)
+- **Display**: Flat list of 1,240 contracts with virtual scrolling (react-window)
+- **Sorting**: Primary by |Z-score| descending
+- **Colors**: Blue-orange scale only (no red/green)
+- **Database**: New `funding_statistics` table with z-score calculations
+- **Status**: See `tasklist.md` for implementation progress
+
+#### Z-Score Implementation Critical Requirements
+From `Z_score.md` (lines 1083-1118) - These are NON-NEGOTIABLE:
+1. **FLAT LIST** - 1,240 individual contracts, NO asset grouping
+2. **Virtual Scrolling REQUIRED** - Must use react-window for performance
+3. **Blue-Orange Colors ONLY** - NO red/green colors
+4. **Primary Sort by |Z-score|** - Descending by absolute value
+5. **Dynamic Row Heights** - 40px standard, 120px for |Z| ≥ 2.0
+6. **New Component** - ContractZScoreGrid.tsx, NOT modifying AssetFundingGrid
+
+## Missing Required Packages
+
+### Python Dependencies
+The following packages are required but not in requirements.txt:
+```bash
+pip install fastapi uvicorn psutil scipy black
+```
+
+### React Dependencies for Z-Score Implementation
+```bash
+cd dashboard
+npm install react-window react-window-infinite-loader @types/react-window
+```
