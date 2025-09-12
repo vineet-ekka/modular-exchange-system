@@ -465,11 +465,15 @@ class BinanceExchange(BaseExchange):
             'markPrice': 'mark_price'
         })
         
-        # Auto-detect funding interval
-        if len(df) > 1:
-            df['funding_interval_hours'] = self._detect_funding_interval(df['funding_time'])
+        # Get correct funding interval from API instead of auto-detection
+        # Fetch funding intervals from API
+        interval_map = self._fetch_funding_intervals(market_type)
+        
+        # Apply the correct interval
+        if symbol in interval_map:
+            df['funding_interval_hours'] = interval_map[symbol]
         else:
-            # Default to 8 hours if we can't detect
+            # Default to 8 hours for contracts not in fundingInfo
             df['funding_interval_hours'] = 8
         
         return df

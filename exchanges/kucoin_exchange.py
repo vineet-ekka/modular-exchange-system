@@ -200,7 +200,10 @@ class KuCoinExchange(BaseExchange):
             # Add symbol and exchange info
             df['symbol'] = symbol
             df['exchange'] = 'KuCoin'
-            df['funding_interval_hours'] = 8  # KuCoin uses 8-hour intervals
+            
+            # Get the correct funding interval from active contracts API
+            funding_interval = self._get_funding_interval_for_symbol(symbol)
+            df['funding_interval_hours'] = funding_interval
             
             # Extract base asset from symbol (e.g., XBTUSDTM -> XBT)
             df['base_asset'] = self._extract_base_asset(symbol)
@@ -224,6 +227,36 @@ class KuCoinExchange(BaseExchange):
         except Exception as e:
             self.logger.error(f"Error fetching historical data for {symbol}: {e}")
             return pd.DataFrame()
+    
+    def _get_funding_interval_for_symbol(self, symbol: str) -> int:
+        """
+        Get the funding interval for a specific symbol from the active contracts API.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'XBTUSDTM')
+            
+        Returns:
+            Funding interval in hours (1, 4, or 8)
+        """
+        try:
+            # Fetch active contracts
+            contracts_data = self.safe_request(self.base_url + 'contracts/active')
+            
+            if contracts_data and 'data' in contracts_data:
+                for contract in contracts_data['data']:
+                    if contract.get('symbol') == symbol:
+                        # Get funding rate granularity in milliseconds
+                        granularity_ms = contract.get('fundingRateGranularity', 0)
+                        if granularity_ms > 0:
+                            # Convert to hours
+                            return int(granularity_ms / (1000 * 60 * 60))
+            
+            # Default to 8 hours if not found
+            return 8
+            
+        except Exception as e:
+            self.logger.warning(f"Could not get funding interval for {symbol}: {e}")
+            return 8
     
     def _extract_base_asset(self, symbol: str) -> str:
         """
