@@ -24,6 +24,24 @@ services:
     networks:
       - exchange_network
 
+  redis:
+    image: redis:7-alpine
+    container_name: exchange_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - exchange_network
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: exchange_pgadmin
@@ -51,5 +69,7 @@ networks:
 volumes:
   postgres_data:
     name: exchange_postgres_data
+  redis_data:
+    name: exchange_redis_data
   pgadmin_data:
     name: exchange_pgadmin_data

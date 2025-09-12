@@ -26,6 +26,9 @@ from database.postgres_manager import PostgresManager
 from utils.logger import setup_logger, log_execution_time
 from utils.health_tracker import get_health_report
 from utils.health_check import print_health_status
+from utils.contract_metadata_manager import ContractMetadataManager
+from utils.backfill_completeness import BackfillCompletenessValidator
+from utils.zscore_calculator import ZScoreCalculator
 
 
 class ExchangeDataSystem:
@@ -45,6 +48,9 @@ class ExchangeDataSystem:
         self.logger = setup_logger("main")
         self.exchange_factory = ExchangeFactory(EXCHANGES)
         self.db_manager = PostgresManager()
+        self.metadata_manager = ContractMetadataManager(self.db_manager.connection)
+        self.completeness_validator = BackfillCompletenessValidator()
+        self.last_completeness_check = None
         self.data_processor = None
         self.unified_data = None
         
@@ -82,6 +88,15 @@ class ExchangeDataSystem:
             
             # Step 4: Upload to database
             self._upload_to_database()
+            
+            # Step 5: Calculate and update Z-scores
+            self._update_zscore_statistics()
+            
+            # Step 6: Sync contract metadata (NEW)
+            self._sync_contract_metadata()
+            
+            # Step 7: Check data completeness (hourly)
+            self._check_data_completeness()
             
             print("\n" + "="*60)
             print("OK SYSTEM COMPLETED SUCCESSFULLY")
@@ -149,6 +164,100 @@ class ExchangeDataSystem:
                 print("OK Data uploaded to database successfully")
             else:
                 print("! Database upload failed")
+    
+    def _update_zscore_statistics(self):
+        """Calculate and update Z-scores and percentiles for all contracts."""
+        print("\n5. Calculating Z-scores and percentiles...")
+        
+        try:
+            # Create Z-score calculator instance with database connection
+            zscore_calc = ZScoreCalculator(self.db_manager.connection)
+            
+            # Update statistics
+            result = zscore_calc.process_all_contracts()
+            
+            if result:
+                print(f"✓ Z-scores updated for {result.get('contracts_updated', 0)} contracts")
+                if result.get('extreme_values', 0) > 0:
+                    print(f"  ! {result.get('extreme_values', 0)} contracts with |Z| > 2.0")
+            else:
+                print("✓ Z-scores calculation completed")
+                
+        except Exception as e:
+            self.logger.error(f"Z-score calculation failed: {e}")
+            print(f"! Z-score calculation failed: {e}")
+    
+    def _sync_contract_metadata(self):
+        """Synchronize contract metadata table with current data."""
+        print("\n6. Syncing contract metadata...")
+        
+        try:
+            sync_stats = self.metadata_manager.sync_with_exchange_data()
+            
+            if 'error' in sync_stats:
+                print(f"! Metadata sync failed: {sync_stats['error']}")
+            else:
+                if sync_stats['new_listings'] > 0:
+                    print(f"+ Added {sync_stats['new_listings']} new contract(s)")
+                if sync_stats['delistings'] > 0:
+                    print(f"- Marked {sync_stats['delistings']} contract(s) as delisted")
+                if sync_stats['updates'] > 0:
+                    print(f"~ Updated {sync_stats['updates']} contract(s)")
+                
+                if sync_stats['new_listings'] == 0 and sync_stats['delistings'] == 0 and sync_stats['updates'] == 0:
+                    print("OK Metadata is up to date")
+                else:
+                    print(f"OK Metadata sync completed")
+                    
+        except Exception as e:
+            self.logger.error(f"Metadata sync error: {e}")
+            print(f"! Metadata sync error: {e}")
+    
+    def _check_data_completeness(self, force: bool = False):
+        """Check data completeness periodically and log warnings."""
+        # Only check every hour to avoid overhead
+        current_time = datetime.now(timezone.utc)
+        
+        if not force and self.last_completeness_check:
+            time_since_last_check = (current_time - self.last_completeness_check).total_seconds()
+            if time_since_last_check < 3600:  # Less than 1 hour
+                return
+        
+        print("\n6. Checking data completeness...")
+        
+        try:
+            # Quick validation for current contracts
+            incomplete_count = 0
+            low_completeness = []
+            
+            # Sample check - validate a few critical contracts
+            sample_contracts = [
+                ('binance', 'BTCUSDT'),
+                ('binance', 'ETHUSDT'),
+                ('kucoin', 'XBTUSDTM'),
+                ('hyperliquid', 'BTC'),
+            ]
+            
+            for exchange, symbol in sample_contracts:
+                result = self.completeness_validator.validate_contract(exchange, symbol, days=30)
+                completeness = result.get('completeness_percentage', 0)
+                
+                if completeness < 95:
+                    incomplete_count += 1
+                    low_completeness.append(f"{exchange}:{symbol} ({completeness:.1f}%)")
+            
+            if incomplete_count > 0:
+                self.logger.warning(f"Data completeness warning: {incomplete_count} contracts below 95% threshold")
+                print(f"! Data completeness warning: {', '.join(low_completeness)}")
+                print(f"  Run 'python scripts/retry_incomplete_contracts.py' to fix gaps")
+            else:
+                print("OK Data completeness check passed")
+            
+            self.last_completeness_check = current_time
+            
+        except Exception as e:
+            self.logger.error(f"Completeness check error: {e}")
+            print(f"! Completeness check error: {e}")
     
     def get_statistics(self) -> dict:
         """

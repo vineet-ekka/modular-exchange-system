@@ -121,6 +121,14 @@ HISTORICAL_WINDOW_DAYS = 30  # Default window size in days
 HISTORICAL_BASE_BACKOFF = 60
 
 # =============================================================================
+# Z-SCORE CALCULATION SETTINGS
+# =============================================================================
+# Number of days to use for Z-score calculation window (default: 30 days)
+# This determines how many days of historical data are used to calculate
+# the mean, standard deviation, and percentiles for Z-score analysis
+ZSCORE_CALCULATION_DAYS = 30
+
+# =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
 # Validation is now done in exchange-data-collector.py when the system starts

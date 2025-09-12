@@ -251,6 +251,13 @@ export interface ContractDetails {
   contract_type: string;
   market_type: string;
   last_updated: string;
+  mean_30d?: number | null;         // 30-day mean funding rate
+  std_dev_30d?: number | null;      // 30-day standard deviation
+  mean_30d_apr?: number | null;     // 30-day mean APR
+  std_dev_30d_apr?: number | null;  // 30-day APR standard deviation
+  current_z_score?: number | null;   // Current Z-score
+  current_percentile?: number | null;     // Current percentile (0-100)
+  current_percentile_apr?: number | null; // Current APR percentile (0-100)
 }
 
 export const fetchFundingRatesGrid = async (): Promise<AssetGridResponse | null> => {
@@ -284,6 +291,58 @@ export const fetchHistoricalFundingByAsset = async (
     return response.data;
   } catch (error) {
     console.error('Error fetching historical funding by asset:', error);
+    return null;
+  }
+};
+
+// Z-Score Contract Interface (Following Z_score.md lines 360-379 and tasklist lines 124-144)
+export interface ContractZScore {
+  contract: string;                   // Contract symbol
+  exchange: string;                  // Exchange name
+  base_asset: string;                // Base asset
+  z_score: number;                   // Z-score for funding rate
+  z_score_apr: number;               // Z-score for APR
+  funding_rate: number;              // Current funding rate
+  apr: number;                       // Current APR
+  percentile: number;                // Percentile rank (0-100)
+  percentile_apr: number;            // Percentile rank for APR (0-100)
+  mean_30d: number;                  // 30-day mean funding rate
+  std_dev_30d: number;               // 30-day standard deviation
+  mean_30d_apr: number;              // 30-day mean APR
+  std_dev_30d_apr: number;           // 30-day standard deviation APR
+  data_points: number;               // Number of data points used
+  expected_points: number;           // Expected data points
+  completeness_percentage: number;   // Data completeness percentage
+  confidence: string;                // Confidence level (none/low/medium/high/very_high)
+  funding_interval_hours: number;    // Funding interval in hours
+  next_funding_seconds: number;      // Seconds until next funding
+}
+
+export interface ContractZScoreResponse {
+  contracts: ContractZScore[];      // Array of contracts with Z-scores (1,240-1,260 contracts)
+  total: number;                    // Total number of contracts
+  high_deviation_count: number;     // Count of contracts with |Z| > 2.0
+  update_timestamp: string;          // Last update timestamp
+}
+
+// Fetch contracts with Z-scores (primary endpoint for Z-score grid)
+export const fetchContractsWithZScores = async (
+  sort: 'zscore_abs' | 'zscore_asc' | 'zscore_desc' | 'contract' | 'exchange' = 'zscore_abs',
+  minAbsZScore?: number,
+  exchanges?: string[],
+  search?: string
+): Promise<ContractZScoreResponse | null> => {
+  try {
+    const params = new URLSearchParams();
+    params.append('sort', sort);
+    if (minAbsZScore !== undefined) params.append('min_abs_zscore', minAbsZScore.toString());
+    if (exchanges && exchanges.length > 0) params.append('exchanges', exchanges.join(','));
+    if (search) params.append('search', search);
+    
+    const response = await api.get(`/api/contracts-with-zscores?${params}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching contracts with Z-scores:', error);
     return null;
   }
 };

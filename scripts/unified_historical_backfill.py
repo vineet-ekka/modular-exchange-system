@@ -76,6 +76,7 @@ class UnifiedBackfill:
         
         # Progress tracking
         self.progress_data = {}
+        self.symbol_completeness = {}  # Track per-symbol completeness
         self.lock = threading.Lock()
         
         # Status file for overall progress
@@ -145,8 +146,8 @@ class UnifiedBackfill:
             self.dashboard_lock_file.unlink()
     
     def update_progress(self, exchange: str, symbols_processed: int, total_symbols: int, 
-                       records_fetched: int, status: str = "processing"):
-        """Update progress for an exchange."""
+                       records_fetched: int, status: str = "processing", completeness_data: dict = None):
+        """Update progress for an exchange with optional completeness data."""
         with self.lock:
             self.progress_data[exchange] = {
                 'symbols_processed': symbols_processed,
@@ -155,6 +156,12 @@ class UnifiedBackfill:
                 'status': status,
                 'progress': int((symbols_processed / total_symbols * 100)) if total_symbols > 0 else 0
             }
+            
+            # Store completeness data if provided
+            if completeness_data:
+                if exchange not in self.symbol_completeness:
+                    self.symbol_completeness[exchange] = {}
+                self.symbol_completeness[exchange].update(completeness_data)
             
             # Calculate overall progress
             total_progress = 0
@@ -169,12 +176,25 @@ class UnifiedBackfill:
             
             overall_progress = int(total_progress / active_exchanges) if active_exchanges > 0 else 0
             
+            # Calculate completeness metrics
+            completeness_summary = {}
+            if self.symbol_completeness:
+                for ex, symbols in self.symbol_completeness.items():
+                    complete_count = sum(1 for s in symbols.values() if s.get('completeness', 0) >= 95)
+                    total = len(symbols)
+                    completeness_summary[ex] = {
+                        'complete': complete_count,
+                        'total': total,
+                        'percentage': round(complete_count / total * 100, 2) if total > 0 else 0
+                    }
+            
             # Write status files
             status_data = {
                 'running': True,
                 'overall_progress': overall_progress,
                 'total_records': total_records,
                 'exchanges': self.progress_data,
+                'completeness': completeness_summary,
                 'message': f"Processing {active_exchanges} exchange(s)..."
             }
             self.status_file.write_text(json.dumps(status_data, indent=2))
@@ -244,6 +264,37 @@ class UnifiedBackfill:
             logger.info(f"{exchange_name.upper()}: Successfully fetched {len(historical_df)} records in {elapsed_time:.2f}s")
             unique_symbols = historical_df['symbol'].nunique() if 'symbol' in historical_df.columns else 0
             logger.info(f"{exchange_name.upper()}: {unique_symbols} unique contracts processed")
+            
+            # Calculate per-symbol completeness
+            completeness_data = {}
+            if 'symbol' in historical_df.columns and 'funding_interval_hours' in historical_df.columns:
+                for symbol in historical_df['symbol'].unique():
+                    symbol_data = historical_df[historical_df['symbol'] == symbol]
+                    actual_points = len(symbol_data)
+                    
+                    # Get funding interval (use most common if varies)
+                    funding_interval = symbol_data['funding_interval_hours'].mode()[0] if not symbol_data['funding_interval_hours'].empty else 8
+                    
+                    # Calculate expected points for 30-day window
+                    expected_points = (self.days * 24) / funding_interval
+                    completeness_pct = (actual_points / expected_points * 100) if expected_points > 0 else 0
+                    
+                    completeness_data[symbol] = {
+                        'actual': actual_points,
+                        'expected': int(expected_points),
+                        'completeness': round(completeness_pct, 2),
+                        'interval': funding_interval
+                    }
+                    
+                    # Log warnings for low completeness
+                    if completeness_pct < 95:
+                        logger.warning(f"{exchange_name}:{symbol} - Low completeness: {completeness_pct:.1f}% ({actual_points}/{int(expected_points)} points)")
+            
+            # Log completeness summary
+            if completeness_data:
+                complete_symbols = sum(1 for s in completeness_data.values() if s['completeness'] >= 95)
+                logger.info(f"{exchange_name.upper()}: {complete_symbols}/{len(completeness_data)} symbols have ≥95% completeness")
+            
             logger.info(f"="*60)
             
             # Upload to database
@@ -259,7 +310,8 @@ class UnifiedBackfill:
                     self.update_progress(exchange_name, 
                                        historical_df['symbol'].nunique(),
                                        historical_df['symbol'].nunique(),
-                                       len(historical_df), "completed")
+                                       len(historical_df), "completed",
+                                       completeness_data=completeness_data)
                     return (exchange_name, len(historical_df), True)
                 else:
                     logger.error(f"Failed to upload {exchange_name} data")
@@ -270,7 +322,8 @@ class UnifiedBackfill:
                 self.update_progress(exchange_name,
                                    historical_df['symbol'].nunique(),
                                    historical_df['symbol'].nunique(),
-                                   len(historical_df), "completed_dry_run")
+                                   len(historical_df), "completed_dry_run",
+                                   completeness_data=completeness_data)
                 return (exchange_name, len(historical_df), True)
                 
         except Exception as e:

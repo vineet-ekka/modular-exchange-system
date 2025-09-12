@@ -16,6 +16,17 @@ import json
 import shutil
 import threading
 
+# Force unbuffered output for immediate display
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True)
+
+# Alternative for Python < 3.7
+if sys.version_info < (3, 7):
+    sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 1)
+    sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', 1)
+
 # Set encoding for Windows
 if sys.platform == "win32":
     import locale
@@ -47,23 +58,25 @@ class Colors:
 
 def print_header():
     """Print startup header."""
-    print("\n" + "="*60)
-    print(f"{Colors.BOLD}EXCHANGE DASHBOARD - SIMPLIFIED STARTUP{Colors.RESET}")
-    print("="*60 + "\n")
+    print("\n" + "="*60, flush=True)
+    print(f"{Colors.BOLD}EXCHANGE DASHBOARD - SIMPLIFIED STARTUP{Colors.RESET}", flush=True)
+    print("="*60 + "\n", flush=True)
+    sys.stdout.flush()
 
 def print_status(message, status="info"):
     """Print colored status messages."""
     # Use ASCII symbols for better compatibility
     if status == "success":
-        print(f"{Colors.GREEN}[OK] {message}{Colors.RESET}")
+        print(f"{Colors.GREEN}[OK] {message}{Colors.RESET}", flush=True)
     elif status == "error":
-        print(f"{Colors.RED}[ERROR] {message}{Colors.RESET}")
+        print(f"{Colors.RED}[ERROR] {message}{Colors.RESET}", flush=True)
     elif status == "warning":
-        print(f"{Colors.YELLOW}[WARN] {message}{Colors.RESET}")
+        print(f"{Colors.YELLOW}[WARN] {message}{Colors.RESET}", flush=True)
     elif status == "info":
-        print(f"{Colors.BLUE}[INFO] {message}{Colors.RESET}")
+        print(f"{Colors.BLUE}[INFO] {message}{Colors.RESET}", flush=True)
     else:
-        print(f"   {message}")
+        print(f"   {message}", flush=True)
+    sys.stdout.flush()
 
 def check_command(command):
     """Check if a command is available."""
@@ -100,6 +113,19 @@ def is_postgres_running():
             shell=True
         )
         return "exchange_postgres" in result.stdout
+    except:
+        return False
+
+def is_redis_running():
+    """Check if Redis container is running."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps"],
+            capture_output=True,
+            text=True,
+            shell=True
+        )
+        return "exchange_redis" in result.stdout
     except:
         return False
 
@@ -141,6 +167,46 @@ def start_postgres():
     except subprocess.CalledProcessError as e:
         print_status(f"Failed to start PostgreSQL: {e}", "error")
         return False
+
+def start_redis():
+    """Start Redis container."""
+    print_status("Starting Redis cache...", "info")
+    
+    if is_redis_running():
+        print_status("Redis is already running", "success")
+        return True
+    
+    try:
+        # Check if Docker is running
+        subprocess.run(["docker", "info"], capture_output=True, check=True, shell=True)
+    except:
+        print_status("Docker is not running. Please start Docker Desktop first.", "error")
+        return False
+    
+    try:
+        print("   Starting Redis container...")
+        subprocess.run(
+            ["docker-compose", "up", "-d", "redis"],
+            check=True,
+            shell=True,
+            capture_output=True
+        )
+        
+        # Wait for Redis to be ready
+        print("   Waiting for Redis to be ready...")
+        for i in range(10):
+            time.sleep(1)
+            if is_redis_running():
+                print_status("Redis started successfully", "success")
+                return True
+        
+        print_status("Redis is taking longer than expected to start", "warning")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print_status(f"Failed to start Redis: {e}", "error")
+        print_status("The system will continue without Redis caching", "warning")
+        return True  # Don't fail the entire startup if Redis fails
 
 def check_npm_dependencies():
     """Check if npm dependencies are installed."""
@@ -373,28 +439,37 @@ def open_dashboard():
 
 def print_summary(collector_running=True):
     """Print summary of running services."""
-    print("\n" + "="*60)
-    print(f"{Colors.BOLD}DASHBOARD READY!{Colors.RESET}")
-    print("="*60)
-    print(f"\n{Colors.GREEN}Services running:{Colors.RESET}")
-    print(f"  Dashboard:  {Colors.BLUE}http://localhost:3000{Colors.RESET}")
-    print(f"  API Server: {Colors.BLUE}http://localhost:8000{Colors.RESET}")
-    print(f"  API Docs:   {Colors.BLUE}http://localhost:8000/docs{Colors.RESET}")
-    print(f"  PostgreSQL: localhost:5432")
-    print(f"\n{Colors.GREEN}Background processes:{Colors.RESET}")
-    if collector_running:
-        print(f"  Real-time collector: Every 30 seconds (check data_collector.log)")
+    print("\n" + "="*60, flush=True)
+    print(f"{Colors.BOLD}DASHBOARD READY!{Colors.RESET}", flush=True)
+    print("="*60, flush=True)
+    print(f"\n{Colors.GREEN}Services running:{Colors.RESET}", flush=True)
+    print(f"  Dashboard:  {Colors.BLUE}http://localhost:3000{Colors.RESET}", flush=True)
+    print(f"  API Server: {Colors.BLUE}http://localhost:8000{Colors.RESET}", flush=True)
+    print(f"  API Docs:   {Colors.BLUE}http://localhost:8000/docs{Colors.RESET}", flush=True)
+    print(f"  PostgreSQL: localhost:5432", flush=True)
+    if is_redis_running():
+        print(f"  Redis:      localhost:6379 (caching enabled)", flush=True)
     else:
-        print(f"  Real-time collector: {Colors.YELLOW}Not running - start manually with:{Colors.RESET}")
-        print(f"    python main.py --loop --interval 30")
-    print(f"  Historical refresh: 30-day backfill running")
-    print(f"\n{Colors.BLUE}Data updates:{Colors.RESET}")
-    print(f"  Dashboard auto-refreshes every 30 seconds")
-    print(f"  Historical data updating in background (~5-7 min)")
-    print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}")
+        print(f"  Redis:      {Colors.YELLOW}Not running (fallback to in-memory cache){Colors.RESET}", flush=True)
+    print(f"\n{Colors.GREEN}Background processes:{Colors.RESET}", flush=True)
+    if collector_running:
+        print(f"  Real-time collector: Every 30 seconds (check data_collector.log)", flush=True)
+    else:
+        print(f"  Real-time collector: {Colors.YELLOW}Not running - start manually with:{Colors.RESET}", flush=True)
+        print(f"    python main.py --loop --interval 30", flush=True)
+    print(f"  Historical refresh: 30-day backfill running", flush=True)
+    print(f"\n{Colors.BLUE}Data updates:{Colors.RESET}", flush=True)
+    print(f"  Dashboard auto-refreshes every 30 seconds", flush=True)
+    print(f"  Historical data updating in background (~5-7 min)", flush=True)
+    print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}", flush=True)
+    sys.stdout.flush()
 
 def main():
     """Main startup sequence."""
+    # Immediate output to show script is running
+    print("Starting Exchange Dashboard System...", flush=True)
+    sys.stdout.flush()
+    
     print_header()
     
     # Step 1: Check prerequisites
@@ -411,7 +486,12 @@ def main():
     
     print()  # Empty line for spacing
     
-    # Step 3: Check/install npm dependencies
+    # Step 3: Start Redis Cache
+    start_redis()  # Don't fail if Redis doesn't start
+    
+    print()  # Empty line for spacing
+    
+    # Step 4: Check/install npm dependencies
     if not check_npm_dependencies():
         print_status("\nFailed to set up dashboard dependencies.", "error")
         sys.exit(1)
@@ -459,6 +539,16 @@ def main():
 
 if __name__ == "__main__":
     try:
+        # Force immediate output
+        print("Initializing startup script...", flush=True)
+        sys.stdout.flush()
+        
+        # Check if running from a terminal that will close immediately
+        if sys.platform == "win32" and not sys.stdin.isatty():
+            # Add a pause for Windows when not running in interactive terminal
+            import atexit
+            atexit.register(lambda: input("\nPress Enter to exit..."))
+        
         main()
     except Exception as e:
         print_status(f"\nUnexpected error: {e}", "error")

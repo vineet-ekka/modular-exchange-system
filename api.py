@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2 import pool
 import pandas as pd
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
@@ -17,13 +18,21 @@ import os
 import time
 import subprocess
 import signal
+import math
 from pathlib import Path
 from dotenv import load_dotenv
 from config.settings_manager import SettingsManager
 from database.postgres_manager import PostgresManager
+from functools import lru_cache
+import hashlib
+from utils.redis_cache import RedisCache, CacheKeys
+import logging
 
 # Load environment variables
 load_dotenv()
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="Exchange Data API",
@@ -40,6 +49,112 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Simple time-based cache implementation for API responses
+class SimpleCache:
+    """Simple in-memory cache with TTL support."""
+    
+    def __init__(self):
+        self.cache = {}
+        self.timestamps = {}
+    
+    def get(self, key: str, ttl_seconds: int = 5) -> Optional[Any]:
+        """Get cached value if not expired."""
+        if key not in self.cache:
+            return None
+        
+        # Check if cache expired
+        if time.time() - self.timestamps[key] > ttl_seconds:
+            del self.cache[key]
+            del self.timestamps[key]
+            return None
+        
+        return self.cache[key]
+    
+    def set(self, key: str, value: Any) -> None:
+        """Set cache value with current timestamp."""
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+    
+    def clear(self) -> None:
+        """Clear all cache entries."""
+        self.cache.clear()
+        self.timestamps.clear()
+
+# Performance monitoring class
+class PerformanceMonitor:
+    """Track performance metrics for API endpoints and operations."""
+    
+    def __init__(self):
+        self.metrics = {}
+        self.thresholds = {
+            'api_response': 100,  # ms
+            'db_query': 50,       # ms
+            'zscore_calc': 1000,  # ms
+            'cache_hit_rate': 0.5 # ratio
+        }
+    
+    def record(self, operation: str, duration_ms: float, metadata: Dict = None):
+        """Record a performance metric."""
+        if operation not in self.metrics:
+            self.metrics[operation] = {
+                'count': 0,
+                'total_ms': 0,
+                'avg_ms': 0,
+                'min_ms': float('inf'),
+                'max_ms': 0,
+                'last_ms': 0,
+                'last_recorded': None,
+                'violations': 0
+            }
+        
+        metric = self.metrics[operation]
+        metric['count'] += 1
+        metric['total_ms'] += duration_ms
+        metric['avg_ms'] = metric['total_ms'] / metric['count']
+        metric['min_ms'] = min(metric['min_ms'], duration_ms)
+        metric['max_ms'] = max(metric['max_ms'], duration_ms)
+        metric['last_ms'] = duration_ms
+        metric['last_recorded'] = datetime.now(timezone.utc)
+        
+        # Check threshold violations
+        threshold_key = operation.split(':')[0] if ':' in operation else operation
+        if threshold_key in self.thresholds and duration_ms > self.thresholds[threshold_key]:
+            metric['violations'] += 1
+    
+    def get_metrics(self) -> Dict:
+        """Get all performance metrics."""
+        return {
+            'metrics': self.metrics,
+            'thresholds': self.thresholds,
+            'summary': self._get_summary()
+        }
+    
+    def _get_summary(self) -> Dict:
+        """Generate performance summary."""
+        total_operations = sum(m['count'] for m in self.metrics.values())
+        total_violations = sum(m['violations'] for m in self.metrics.values())
+        
+        # Get latest Z-score calculation time
+        zscore_metric = self.metrics.get('zscore_calc', {})
+        zscore_last = zscore_metric.get('last_ms', 0)
+        
+        return {
+            'total_operations': total_operations,
+            'total_violations': total_violations,
+            'violation_rate': total_violations / total_operations if total_operations > 0 else 0,
+            'zscore_performance': {
+                'last_ms': zscore_last,
+                'target_ms': 1000,
+                'status': '✅ MET' if zscore_last <= 1000 else '❌ MISSED'
+            },
+            'health_status': 'healthy' if total_violations < total_operations * 0.1 else 'degraded'
+        }
+
+# Initialize cache and performance monitor
+# Use Redis cache with automatic fallback to SimpleCache
+api_cache = RedisCache()
+performance_monitor = PerformanceMonitor()
+
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv("POSTGRES_HOST", "localhost"),
@@ -49,14 +164,37 @@ DB_CONFIG = {
     'password': os.getenv("POSTGRES_PASSWORD", "postgres123")
 }
 
+# Initialize connection pool for better performance
+try:
+    connection_pool = psycopg2.pool.ThreadedConnectionPool(
+        minconn=2,
+        maxconn=10,
+        **DB_CONFIG,
+        cursor_factory=RealDictCursor
+    )
+    print("Database connection pool initialized successfully")
+except Exception as e:
+    print(f"Failed to initialize connection pool: {e}")
+    connection_pool = None
+
 def get_db_connection():
-    """Create database connection with RealDictCursor for JSON serialization."""
+    """Get database connection from pool with RealDictCursor for JSON serialization."""
     try:
+        if connection_pool:
+            conn = connection_pool.getconn()
+            if conn:
+                return conn
+        # Fallback to direct connection if pool fails
         conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
         return conn
     except Exception as e:
         print(f"Database connection error: {e}")
         raise HTTPException(status_code=500, detail="Database connection failed")
+
+def return_db_connection(conn):
+    """Return connection to pool."""
+    if connection_pool and conn:
+        connection_pool.putconn(conn)
 
 @app.get("/")
 async def root():
@@ -87,12 +225,82 @@ async def health_check():
         cur = conn.cursor()
         cur.execute("SELECT 1")
         cur.close()
-        conn.close()
+        return_db_connection(conn)
         return {"status": "healthy", "database": "connected"}
     except:
         return JSONResponse(
             status_code=503,
             content={"status": "unhealthy", "database": "disconnected"}
+        )
+
+@app.get("/api/health/performance")
+async def performance_health():
+    """Performance monitoring endpoint with detailed metrics."""
+    try:
+        # Test database performance
+        db_start = time.perf_counter()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Test query performance
+        cur.execute("""
+            SELECT COUNT(*) as total_contracts,
+                   AVG(ABS(current_z_score)) as avg_abs_zscore,
+                   MAX(last_updated) as last_update
+            FROM funding_statistics
+        """)
+        db_stats = cur.fetchone()
+        db_duration = (time.perf_counter() - db_start) * 1000
+        performance_monitor.record('db_query:health_check', db_duration)
+        
+        # Get Z-score calculation performance from last run
+        cur.execute("""
+            SELECT 
+                MAX(calculated_at) as last_calc,
+                EXTRACT(EPOCH FROM (NOW() - MAX(calculated_at))) as seconds_ago,
+                COUNT(*) as total_contracts,
+                COUNT(CASE WHEN ABS(current_z_score) > 2 THEN 1 END) as extreme_contracts
+            FROM funding_statistics
+        """)
+        zscore_stats = cur.fetchone()
+        
+        cur.close()
+        return_db_connection(conn)
+        
+        # Get performance metrics
+        perf_metrics = performance_monitor.get_metrics()
+        
+        return {
+            "status": perf_metrics['summary']['health_status'],
+            "database": {
+                "connected": True,
+                "query_time_ms": db_duration,
+                "total_contracts": db_stats['total_contracts'] if db_stats else 0,
+                "avg_abs_zscore": float(db_stats['avg_abs_zscore']) if db_stats and db_stats['avg_abs_zscore'] else 0
+            },
+            "zscore_calculation": {
+                "last_run": zscore_stats['last_calc'].isoformat() if zscore_stats and zscore_stats['last_calc'] else None,
+                "seconds_ago": float(zscore_stats['seconds_ago']) if zscore_stats and zscore_stats['seconds_ago'] else None,
+                "total_contracts": zscore_stats['total_contracts'] if zscore_stats else 0,
+                "extreme_contracts": zscore_stats['extreme_contracts'] if zscore_stats else 0,
+                "performance": perf_metrics['summary']['zscore_performance']
+            },
+            "performance_metrics": perf_metrics,
+            "cache_stats": {
+                "entries": len(api_cache.cache),
+                "oldest_entry": min(api_cache.timestamps.values()) if api_cache.timestamps else None
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
         )
 
 @app.get("/api/funding-rates")
@@ -112,46 +320,58 @@ async def get_funding_rates(
     cur = conn.cursor()
     
     try:
-        # Build query with filters
+        # Build query with filters, include 30-day statistics from funding_statistics
         query = """
             SELECT 
-                exchange,
-                symbol,
-                base_asset,
-                quote_asset,
-                funding_rate,
-                funding_interval_hours,
-                apr,
-                index_price,
-                mark_price,
-                open_interest,
-                contract_type,
-                market_type,
-                last_updated
-            FROM exchange_data
+                ed.exchange,
+                ed.symbol,
+                ed.base_asset,
+                ed.quote_asset,
+                ed.funding_rate,
+                ed.funding_interval_hours,
+                ed.apr,
+                ed.index_price,
+                ed.mark_price,
+                ed.open_interest,
+                ed.contract_type,
+                ed.market_type,
+                ed.last_updated,
+                fs.mean_30d,
+                fs.std_dev_30d,
+                fs.mean_30d_apr,
+                fs.std_dev_30d_apr,
+                fs.current_z_score,
+                fs.current_percentile,
+                fs.current_percentile_apr
+            FROM exchange_data ed
+            LEFT JOIN funding_statistics fs 
+                ON ed.exchange = fs.exchange AND ed.symbol = fs.symbol
             WHERE 1=1
         """
         params = []
         
         # Apply exchange filter if provided
         if exchange:
-            query += " AND LOWER(exchange) = LOWER(%s)"
+            query += " AND LOWER(ed.exchange) = LOWER(%s)"
             params.append(exchange)
         
         if base_asset:
-            query += " AND LOWER(base_asset) = LOWER(%s)"
+            query += " AND LOWER(ed.base_asset) = LOWER(%s)"
             params.append(base_asset)
         
         if min_apr is not None:
-            query += " AND apr >= %s"
+            query += " AND ed.apr >= %s"
             params.append(min_apr)
         
         if max_apr is not None:
-            query += " AND apr <= %s"
+            query += " AND ed.apr <= %s"
             params.append(max_apr)
         
-        # Add sorting
-        query += f" ORDER BY {sort_by} {sort_order.upper()} NULLS LAST"
+        # Add sorting (prefix with ed. for columns from exchange_data)
+        if sort_by in ['apr', 'funding_rate', 'open_interest', 'symbol', 'exchange']:
+            query += f" ORDER BY ed.{sort_by} {sort_order.upper()} NULLS LAST"
+        else:
+            query += f" ORDER BY {sort_by} {sort_order.upper()} NULLS LAST"
         query += " LIMIT %s"
         params.append(limit)
         
@@ -162,8 +382,10 @@ async def get_funding_rates(
         data = []
         for row in results:
             item = dict(row)
-            # Convert Decimal to float
-            for key in ['funding_rate', 'apr', 'index_price', 'mark_price', 'open_interest']:
+            # Convert Decimal to float for all numeric fields including statistics
+            for key in ['funding_rate', 'apr', 'index_price', 'mark_price', 'open_interest',
+                       'mean_30d', 'std_dev_30d', 'mean_30d_apr', 'std_dev_30d_apr', 'current_z_score',
+                       'current_percentile', 'current_percentile_apr']:
                 if item.get(key) is not None:
                     item[key] = float(item[key])
             # Convert datetime to ISO string
@@ -177,7 +399,7 @@ async def get_funding_rates(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/statistics")
 async def get_statistics():
@@ -228,10 +450,22 @@ async def get_statistics():
             stats['lowest_symbol'] = lowest['symbol']
             stats['lowest_exchange'] = lowest['exchange']
         
-        # Convert Decimal to float
+        # Convert Decimal to float, handle NaN/None values
         for key in ['avg_apr', 'highest_apr', 'lowest_apr', 'total_open_interest']:
-            if stats.get(key) is not None:
-                stats[key] = float(stats[key])
+            value = stats.get(key)
+            if value is not None:
+                # Check if value is a valid number (not NaN)
+                try:
+                    float_val = float(value)
+                    # Replace NaN/Inf with None for JSON compatibility
+                    if math.isnan(float_val) or math.isinf(float_val):
+                        stats[key] = None
+                    else:
+                        stats[key] = float_val
+                except (TypeError, ValueError):
+                    stats[key] = None
+            else:
+                stats[key] = None
         
         # Format large numbers
         stats['total_contracts'] = int(stats['total_contracts']) if stats['total_contracts'] else 0
@@ -244,7 +478,7 @@ async def get_statistics():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/top-apr/{limit}")
 async def get_top_apr(limit: int = 20):
@@ -287,7 +521,7 @@ async def get_top_apr(limit: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/group-by-asset")
 async def group_by_asset():
@@ -332,7 +566,7 @@ async def group_by_asset():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/historical/{symbol}")
 async def get_historical(
@@ -397,7 +631,7 @@ async def get_historical(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/exchanges")
 async def get_exchanges():
@@ -424,7 +658,7 @@ async def get_exchanges():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/assets")
 async def get_assets():
@@ -451,7 +685,7 @@ async def get_assets():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/historical-funding/{symbol}")
 async def get_historical_funding(
@@ -530,7 +764,7 @@ async def get_historical_funding(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/funding-sparkline/{symbol}")
 async def get_funding_sparkline(
@@ -593,7 +827,7 @@ async def get_funding_sparkline(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/funding-rates-grid")
 async def get_funding_rates_grid():
@@ -668,7 +902,7 @@ async def get_funding_rates_grid():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/historical-funding-by-asset/{asset}")
 async def get_historical_funding_by_asset(
@@ -825,7 +1059,7 @@ async def get_historical_funding_by_asset(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/historical-funding-by-contract/{exchange}/{symbol}")
 async def get_historical_funding_by_contract(
@@ -927,7 +1161,7 @@ async def get_historical_funding_by_contract(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/current-funding/{asset}")
 async def get_current_funding(asset: str):
@@ -1004,7 +1238,7 @@ async def get_current_funding(asset: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 @app.get("/api/backfill-status")
 async def get_backfill_status():
@@ -1151,7 +1385,7 @@ async def test_connection():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
-        conn.close()
+        return_db_connection(conn)
 
 # ==================== SETTINGS MANAGEMENT ENDPOINTS ====================
 
@@ -1390,6 +1624,496 @@ async def stop_backfill():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/contracts-with-zscores")
+async def get_contracts_with_zscores(
+    sort: str = Query("zscore_abs", enum=["zscore_abs", "zscore_asc", "zscore_desc", "contract", "exchange"]),
+    min_abs_zscore: Optional[float] = Query(None, ge=0, le=4),
+    exchanges: Optional[str] = Query(None, description="Comma-separated list of exchanges"),
+    search: Optional[str] = Query(None, description="Search term for contract names")
+):
+    """
+    Get all contracts with Z-score statistics with 5-second caching.
+    Returns EXACTLY 1,240 contracts as specified in Z_score.md lines 344-387.
+    """
+    # Generate cache key from parameters
+    cache_key = CacheKeys.contracts_with_zscores(exchanges, search, min_abs_zscore, sort)
+    
+    # Check cache first
+    cached_result = api_cache.get(cache_key, ttl_seconds=5)
+    if cached_result is not None:
+        return cached_result
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Build the query with filters - NO JOIN, use funding_interval_hours from funding_statistics
+        base_query = """
+            SELECT 
+                fs.symbol as contract,
+                fs.exchange,
+                fs.base_asset,
+                fs.current_z_score as z_score,
+                fs.current_z_score_apr as z_score_apr,
+                fs.current_funding_rate as funding_rate,
+                fs.current_apr as apr,
+                fs.current_percentile as percentile,
+                fs.current_percentile_apr as percentile_apr,
+                fs.mean_30d,
+                fs.std_dev_30d,
+                fs.mean_30d_apr,
+                fs.std_dev_30d_apr,
+                fs.data_points,
+                fs.expected_points,
+                fs.completeness_percentage,
+                fs.confidence_level as confidence,
+                COALESCE(fs.funding_interval_hours, 8) as funding_interval_hours,
+                fs.last_updated
+            FROM funding_statistics fs
+            WHERE 1=1
+        """
+        
+        params = []
+        
+        # Apply filters
+        if min_abs_zscore is not None:
+            base_query += " AND ABS(fs.current_z_score) >= %s"
+            params.append(min_abs_zscore)
+        
+        if exchanges:
+            exchange_list = exchanges.split(',')
+            base_query += " AND fs.exchange IN %s"
+            params.append(tuple(exchange_list))
+        
+        if search:
+            base_query += " AND (fs.symbol ILIKE %s OR fs.base_asset ILIKE %s)"
+            search_param = f"%{search}%"
+            params.append(search_param)
+            params.append(search_param)
+        
+        # Apply sorting
+        if sort == "zscore_abs":
+            base_query += " ORDER BY ABS(fs.current_z_score) DESC NULLS LAST"
+        elif sort == "zscore_asc":
+            base_query += " ORDER BY fs.current_z_score ASC NULLS LAST"
+        elif sort == "zscore_desc":
+            base_query += " ORDER BY fs.current_z_score DESC NULLS LAST"
+        elif sort == "contract":
+            base_query += " ORDER BY fs.symbol ASC"
+        elif sort == "exchange":
+            base_query += " ORDER BY fs.exchange ASC, fs.symbol ASC"
+        
+        # Execute query
+        cur.execute(base_query, params)
+        results = cur.fetchall()
+        
+        # Process results and calculate next_funding_seconds
+        contracts = []
+        high_deviation_count = 0
+        now = datetime.now(timezone.utc)
+        
+        for row in results:
+            # Calculate next funding time in seconds
+            funding_interval = row['funding_interval_hours'] or 8
+            current_hour = now.hour
+            next_funding_hour = ((current_hour // funding_interval) + 1) * funding_interval
+            
+            if next_funding_hour >= 24:
+                next_funding_hour = next_funding_hour % 24
+                next_funding_time = now.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                next_funding_time = now.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0)
+            
+            next_funding_seconds = int((next_funding_time - now).total_seconds())
+            
+            # Count high deviation contracts
+            if row['z_score'] and abs(row['z_score']) > 2.0:
+                high_deviation_count += 1
+            
+            contract_data = {
+                'contract': row['contract'],
+                'exchange': row['exchange'],
+                'base_asset': row['base_asset'],
+                'z_score': float(row['z_score']) if row['z_score'] else None,
+                'z_score_apr': float(row['z_score_apr']) if row['z_score_apr'] else None,
+                'funding_rate': float(row['funding_rate']) if row['funding_rate'] else None,
+                'apr': float(row['apr']) if row['apr'] else None,
+                'percentile': row['percentile'],
+                'percentile_apr': row['percentile_apr'],
+                'mean_30d': float(row['mean_30d']) if row['mean_30d'] else None,
+                'std_dev_30d': float(row['std_dev_30d']) if row['std_dev_30d'] else None,
+                'mean_30d_apr': float(row['mean_30d_apr']) if row['mean_30d_apr'] else None,
+                'std_dev_30d_apr': float(row['std_dev_30d_apr']) if row['std_dev_30d_apr'] else None,
+                'data_points': row['data_points'],
+                'expected_points': row['expected_points'],
+                'completeness_percentage': float(row['completeness_percentage']) if row['completeness_percentage'] else None,
+                'confidence': row['confidence'],
+                'funding_interval_hours': row['funding_interval_hours'],
+                'next_funding_seconds': next_funding_seconds
+            }
+            contracts.append(contract_data)
+        
+        result = {
+            'contracts': contracts,
+            'total': len(contracts),
+            'high_deviation_count': high_deviation_count,
+            'update_timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Cache the result with TTL
+        api_cache.set(cache_key, result, ttl_seconds=5)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+@app.get("/api/statistics/extreme-values")
+async def get_extreme_values(
+    min_abs_zscore: float = Query(2.0, ge=0, le=4, description="Minimum absolute Z-score for extreme values")
+):
+    """
+    Get contracts with extreme Z-scores.
+    Reference: Z_score.md lines 459-460
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        query = """
+            SELECT 
+                fs.symbol as contract,
+                fs.exchange,
+                fs.base_asset,
+                fs.current_z_score as z_score,
+                fs.current_z_score_apr as z_score_apr,
+                fs.current_funding_rate as funding_rate,
+                fs.current_apr as apr,
+                fs.current_percentile as percentile,
+                fs.current_percentile_apr as percentile_apr,
+                fs.confidence_level as confidence
+            FROM funding_statistics fs
+            WHERE ABS(fs.current_z_score) >= %s
+            ORDER BY ABS(fs.current_z_score) DESC
+        """
+        
+        cur.execute(query, (min_abs_zscore,))
+        results = cur.fetchall()
+        
+        extreme_contracts = []
+        for row in results:
+            extreme_contracts.append({
+                'contract': row['contract'],
+                'exchange': row['exchange'],
+                'base_asset': row['base_asset'],
+                'z_score': float(row['z_score']) if row['z_score'] else None,
+                'z_score_apr': float(row['z_score_apr']) if row['z_score_apr'] else None,
+                'funding_rate': float(row['funding_rate']) if row['funding_rate'] else None,
+                'apr': float(row['apr']) if row['apr'] else None,
+                'percentile': row['percentile'],
+                'percentile_apr': row['percentile_apr'],
+                'confidence': row['confidence']
+            })
+        
+        return {
+            'extreme_contracts': extreme_contracts,
+            'count': len(extreme_contracts),
+            'threshold': min_abs_zscore,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+@app.get("/api/statistics/summary")
+async def get_statistics_summary():
+    """
+    Get system-wide Z-score statistics with 10-second caching.
+    Reference: Z_score.md lines 459-460
+    """
+    # Check cache first
+    cache_key = "statistics_summary"
+    cached_result = api_cache.get(cache_key, ttl_seconds=10)
+    if cached_result is not None:
+        return cached_result
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get overall statistics
+        cur.execute("""
+            SELECT 
+                COUNT(*) as total_contracts,
+                COUNT(current_z_score) as contracts_with_zscore,
+                AVG(ABS(current_z_score)) as mean_abs_zscore,
+                MAX(ABS(current_z_score)) as max_abs_zscore,
+                COUNT(CASE WHEN ABS(current_z_score) > 2.0 THEN 1 END) as extreme_count,
+                COUNT(CASE WHEN confidence_level = 'very_high' THEN 1 END) as very_high_confidence,
+                COUNT(CASE WHEN confidence_level = 'high' THEN 1 END) as high_confidence,
+                COUNT(CASE WHEN confidence_level = 'medium' THEN 1 END) as medium_confidence,
+                COUNT(CASE WHEN confidence_level = 'low' THEN 1 END) as low_confidence,
+                COUNT(CASE WHEN data_points >= 90 THEN 1 END) as high_data_quality_count
+            FROM funding_statistics
+        """)
+        
+        overall = cur.fetchone()
+        
+        # Get breakdown by exchange
+        cur.execute("""
+            SELECT 
+                exchange,
+                COUNT(*) as contracts,
+                AVG(ABS(current_z_score)) as mean_abs_zscore,
+                COUNT(CASE WHEN ABS(current_z_score) > 2.0 THEN 1 END) as extreme_count,
+                AVG(completeness_percentage) as avg_completeness
+            FROM funding_statistics
+            GROUP BY exchange
+            ORDER BY exchange
+        """)
+        
+        exchange_breakdown = []
+        for row in cur.fetchall():
+            # Safe float conversion handling NaN
+            mean_zscore = None
+            if row['mean_abs_zscore'] is not None:
+                try:
+                    val = float(row['mean_abs_zscore'])
+                    if not (math.isnan(val) or math.isinf(val)):
+                        mean_zscore = val
+                except (TypeError, ValueError):
+                    pass
+            
+            avg_comp = None
+            if row['avg_completeness'] is not None:
+                try:
+                    val = float(row['avg_completeness'])
+                    if not (math.isnan(val) or math.isinf(val)):
+                        avg_comp = val
+                except (TypeError, ValueError):
+                    pass
+            
+            exchange_breakdown.append({
+                'exchange': row['exchange'],
+                'contracts': row['contracts'],
+                'mean_abs_zscore': mean_zscore,
+                'extreme_count': row['extreme_count'],
+                'avg_completeness': avg_comp
+            })
+        
+        # Safe float conversion for overall stats
+        mean_abs_overall = None
+        if overall['mean_abs_zscore'] is not None:
+            try:
+                val = float(overall['mean_abs_zscore'])
+                if not (math.isnan(val) or math.isinf(val)):
+                    mean_abs_overall = val
+            except (TypeError, ValueError):
+                pass
+        
+        max_abs_overall = None
+        if overall['max_abs_zscore'] is not None:
+            try:
+                val = float(overall['max_abs_zscore'])
+                if not (math.isnan(val) or math.isinf(val)):
+                    max_abs_overall = val
+            except (TypeError, ValueError):
+                pass
+        
+        result = {
+            'overall': {
+                'total_contracts': overall['total_contracts'],
+                'contracts_with_zscore': overall['contracts_with_zscore'],
+                'contracts_with_zscore_percentage': (overall['contracts_with_zscore'] / overall['total_contracts'] * 100) if overall['total_contracts'] > 0 else 0,
+                'mean_abs_zscore': mean_abs_overall,
+                'max_abs_zscore': max_abs_overall,
+                'extreme_count': overall['extreme_count'],
+                'high_confidence_contracts': overall['very_high_confidence'] + overall['high_confidence'],
+                'confidence_breakdown': {
+                    'very_high': overall['very_high_confidence'],
+                    'high': overall['high_confidence'],
+                    'medium': overall['medium_confidence'],
+                    'low': overall['low_confidence']
+                }
+            },
+            'exchange_breakdown': exchange_breakdown,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Cache the result with TTL
+        api_cache.set(cache_key, result, ttl_seconds=10)
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
+@app.get("/api/backfill/verify")
+async def verify_backfill_completeness(
+    days: int = Query(30, description="Number of days to analyze"),
+    exchange: str = Query(None, description="Filter by specific exchange"),
+    symbol: str = Query(None, description="Filter by specific symbol"),
+    threshold: float = Query(95.0, description="Minimum completeness threshold percentage")
+):
+    """
+    Verify data completeness for historical backfill.
+    Returns completeness metrics, gap detection, and retry candidates.
+    """
+    from utils.backfill_completeness import BackfillCompletenessValidator
+    
+    try:
+        validator = BackfillCompletenessValidator()
+        
+        if exchange and symbol:
+            # Validate single contract
+            result = validator.validate_contract(exchange, symbol, days)
+            return result
+        elif exchange:
+            # Validate all contracts for specific exchange
+            db = PostgresManager()
+            conn = db.connection
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            
+            cur.execute("""
+                SELECT DISTINCT symbol 
+                FROM funding_rates_historical 
+                WHERE exchange = %s
+                ORDER BY symbol
+            """, (exchange,))
+            
+            contracts = []
+            summary = {
+                'exchange': exchange,
+                'total_contracts': 0,
+                'complete': 0,
+                'incomplete': 0,
+                'needs_retry': []
+            }
+            
+            for row in cur.fetchall():
+                result = validator.validate_contract(exchange, row['symbol'], days)
+                contracts.append(result)
+                summary['total_contracts'] += 1
+                
+                if result.get('completeness_percentage', 0) >= threshold:
+                    summary['complete'] += 1
+                else:
+                    summary['incomplete'] += 1
+                    if result.get('needs_retry', False):
+                        summary['needs_retry'].append(row['symbol'])
+            
+            cur.close()
+            return_db_connection(conn)
+            
+            return {
+                'summary': summary,
+                'contracts': contracts,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            # Full validation (may be slow for many contracts)
+            # For performance, return summary only
+            results = validator.validate_all_contracts(days)
+            
+            # Get retry candidates
+            retry_candidates = validator.get_retry_candidates(threshold)
+            
+            # Return summary and top retry candidates
+            if 'summary' in results:
+                return {
+                    'summary': results['summary'],
+                    'days_analyzed': results.get('days_analyzed', days),
+                    'timestamp': results.get('timestamp'),
+                    'retry_candidates': retry_candidates[:20],  # Limit to top 20
+                    'total_retry_needed': len(retry_candidates)
+                }
+            else:
+                return results
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/health/cache")
+async def get_cache_health():
+    """
+    Get cache health status and performance metrics.
+    Shows whether Redis is connected or fallback to in-memory cache.
+    """
+    try:
+        metrics = api_cache.get_metrics()
+        health_status = api_cache.health_check()
+        
+        return {
+            'status': 'healthy' if health_status else 'degraded',
+            'type': metrics.get('type', 'Unknown'),
+            'connected': metrics.get('connected', False),
+            'host': metrics.get('host', 'N/A'),
+            'metrics': metrics.get('metrics', {}),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+@app.post("/api/backfill/retry")
+async def retry_incomplete_backfill(
+    threshold: float = Query(95.0, description="Minimum completeness threshold"),
+    limit: int = Query(10, description="Maximum number of contracts to retry")
+):
+    """
+    Trigger retry for contracts with incomplete data.
+    """
+    from utils.backfill_completeness import BackfillCompletenessValidator
+    import subprocess
+    import json
+    
+    try:
+        validator = BackfillCompletenessValidator()
+        
+        # Get retry candidates
+        retry_candidates = validator.get_retry_candidates(threshold)[:limit]
+        
+        if not retry_candidates:
+            return {
+                'message': 'No contracts need retry',
+                'threshold': threshold
+            }
+        
+        # Create retry list file
+        retry_file = '.backfill_retry.json'
+        with open(retry_file, 'w') as f:
+            json.dump({
+                'contracts': retry_candidates,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }, f, indent=2, default=str)
+        
+        # Start backfill for retry candidates
+        retry_count = len(retry_candidates)
+        
+        return {
+            'message': f'Retry list created for {retry_count} contracts',
+            'threshold': threshold,
+            'retry_count': retry_count,
+            'contracts': [f"{c['exchange']}:{c['symbol']}" for c in retry_candidates],
+            'retry_file': retry_file,
+            'note': 'Run unified_historical_backfill.py with --retry flag to process these contracts'
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

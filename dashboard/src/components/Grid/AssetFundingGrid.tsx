@@ -428,6 +428,10 @@ const AssetFundingGrid: React.FC = () => {
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Open Interest</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Mark Price</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700">Index Price</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Z-Score</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Percentile</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Mean(30d)</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700">StdDev</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700">Actions</th>
                                 </tr>
                               </thead>
@@ -440,57 +444,76 @@ const AssetFundingGrid: React.FC = () => {
                                   );
                                   
                                   return (
-                                  <tr key={`${contract.exchange}-${contract.symbol}`} 
-                                      className={clsx(
+                                    <tr key={`${contract.exchange}-${contract.symbol}`} className={clsx(
                                         idx % 2 === 0 ? 'bg-white' : 'bg-gray-50',
                                         isContractMatch && 'ring-2 ring-blue-400 ring-opacity-50'
                                       )}>
-                                    <td className={clsx(
-                                      "px-3 py-2 font-medium",
-                                      isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"
-                                    )}>{contract.symbol}</td>
-                                    <td className={clsx(
-                                      "px-3 py-2",
-                                      isContractMatch && contract.exchange.toLowerCase().includes(searchLower) ? "text-blue-700 font-semibold" : "text-gray-700"
-                                    )}>{contract.exchange}</td>
-                                    <td className="px-3 py-2 text-gray-700">{contract.base_asset}</td>
-                                    <td className="px-3 py-2 text-gray-700">{contract.quote_asset}</td>
-                                    <td className="px-3 py-2 text-center font-medium text-gray-700">
-                                      {formatInterval(contract.funding_interval_hours)}
-                                    </td>
-                                    <td className={clsx(
-                                      'px-3 py-2 text-center font-medium',
-                                      contract.funding_rate > 0 ? 'text-green-600' : contract.funding_rate < 0 ? 'text-red-600' : 'text-gray-500'
-                                    )}>
-                                      {formatRate(contract.funding_rate)}
-                                    </td>
-                                    <td className={clsx(
-                                      'px-3 py-2 text-center font-medium',
-                                      contract.apr > 0 ? 'text-green-600' : contract.apr < 0 ? 'text-red-600' : 'text-gray-500'
-                                    )}>
-                                      {contract.apr.toFixed(2)}%
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-gray-700">
-                                      {formatOpenInterest(contract)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-gray-700">
-                                      {formatPrice(contract.mark_price)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right text-gray-700">
-                                      {formatPrice(contract.index_price)}
-                                    </td>
-                                    <td className="px-3 py-2 text-center">
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          navigate(`/historical/${contract.exchange}/${contract.symbol}`);
-                                        }}
-                                        className="text-xs text-blue-500 hover:text-blue-700 underline"
-                                      >
-                                        History
-                                      </button>
-                                    </td>
-                                  </tr>
+                                      <td className={clsx(
+                                        "px-3 py-2 font-medium",
+                                        isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"
+                                      )}>{contract.symbol}</td>
+                                      <td className={clsx(
+                                        "px-3 py-2",
+                                        isContractMatch && contract.exchange.toLowerCase().includes(searchLower) ? "text-blue-700 font-semibold" : "text-gray-700"
+                                      )}>{contract.exchange}</td>
+                                      <td className="px-3 py-2 text-gray-700">{contract.base_asset}</td>
+                                      <td className="px-3 py-2 text-gray-700">{contract.quote_asset}</td>
+                                      <td className="px-3 py-2 text-center font-medium text-gray-700">
+                                        {formatInterval(contract.funding_interval_hours)}
+                                      </td>
+                                      <td className={clsx(
+                                        'px-3 py-2 text-center font-medium',
+                                        contract.funding_rate > 0 ? 'text-green-600' : contract.funding_rate < 0 ? 'text-red-600' : 'text-gray-500'
+                                      )}>
+                                        {formatRate(contract.funding_rate)}
+                                      </td>
+                                      <td className={clsx(
+                                        'px-3 py-2 text-center font-medium',
+                                        contract.apr > 0 ? 'text-green-600' : contract.apr < 0 ? 'text-red-600' : 'text-gray-500'
+                                      )}>
+                                        {contract.apr.toFixed(2)}%
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-700">
+                                        {formatOpenInterest(contract)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-700">
+                                        {formatPrice(contract.mark_price)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-700">
+                                        {formatPrice(contract.index_price)}
+                                      </td>
+                                      <td className={clsx(
+                                        'px-3 py-2 text-center font-medium',
+                                        contract.current_z_score && Math.abs(contract.current_z_score) >= 2 ? 'text-orange-600 font-bold' :
+                                        contract.current_z_score && Math.abs(contract.current_z_score) >= 1 ? 'text-blue-600' : 'text-gray-600'
+                                      )}>
+                                        {contract.current_z_score !== null && contract.current_z_score !== undefined ? contract.current_z_score.toFixed(2) : '-'}
+                                      </td>
+                                      <td className={clsx(
+                                        'px-3 py-2 text-center font-medium',
+                                        contract.current_percentile !== null && contract.current_percentile !== undefined && (contract.current_percentile >= 90 || contract.current_percentile <= 10) ? 'text-orange-600 font-bold' :
+                                        contract.current_percentile !== null && contract.current_percentile !== undefined && (contract.current_percentile >= 75 || contract.current_percentile <= 25) ? 'text-blue-600' : 'text-gray-600'
+                                      )}>
+                                        {contract.current_percentile !== null && contract.current_percentile !== undefined ? `${Math.round(contract.current_percentile)}%` : '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center text-gray-600 text-xs">
+                                        {contract.mean_30d !== null && contract.mean_30d !== undefined ? `${(contract.mean_30d * 100).toFixed(4)}%` : '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center text-gray-600 text-xs">
+                                        {contract.std_dev_30d !== null && contract.std_dev_30d !== undefined ? `${(contract.std_dev_30d * 100).toFixed(4)}%` : '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigate(`/historical/${contract.exchange}/${contract.symbol}`);
+                                          }}
+                                          className="text-xs text-blue-500 hover:text-blue-700 underline"
+                                        >
+                                          History
+                                        </button>
+                                      </td>
+                                    </tr>
                                   );
                                 })}
                               </tbody>

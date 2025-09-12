@@ -38,7 +38,17 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(npx tsc:*)",
-      "Bash(docker-compose up:*)"
+      "Bash(docker-compose up:*)",
+      "Bash(git restore:*)",
+      "Read(/D:\\CC_Project\\modular_exchange_system\\utils/**)",
+      "Read(/D:\\CC_Project\\modular_exchange_system/**)",
+      "Read(/D:\\CC_Project\\modular_exchange_system/**)",
+      "Read(/D:\\CC_Project\\modular_exchange_system/**)",
+      "Read(/D:\\CC_Project\\modular_exchange_system/**)",
+      "Bash(pip install:*)",
+      "Bash(docker start:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.openbb.co)"
     ],
     "deny": []
   }

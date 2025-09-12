@@ -10,6 +10,7 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isSettingsPage = location.pathname === '/settings';
+  const isDashboard = location.pathname === '/';
 
   return (
     <header className="bg-white border-b border-light-border shadow-md">
@@ -28,6 +29,14 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
               <div className="text-sm text-text-secondary">
                 Last Update: {lastUpdate.toLocaleTimeString()}
               </div>
+            )}
+            {!isDashboard && (
+              <button
+                onClick={() => navigate('/')}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors shadow-sm"
+              >
+                Dashboard
+              </button>
             )}
             {!isSettingsPage && (
               <button

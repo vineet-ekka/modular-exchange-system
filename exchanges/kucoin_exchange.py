@@ -46,8 +46,12 @@ class KuCoinExchange(BaseExchange):
             if len(df) == 0:
                 return df
             
-            # Filter for perpetual contracts (FFWCSX type)
-            if 'type' in df.columns:
+            # Filter for perpetual contracts (FFWCSX type) and active status
+            if 'type' in df.columns and 'status' in df.columns:
+                # Only include contracts with status 'Open' (exclude 'Settled', 'Expired', etc.)
+                perp_df = df[(df['type'] == 'FFWCSX') & (df['status'] == 'Open')].copy()
+                self.logger.info(f"Found {len(perp_df)} active perpetual contracts (filtered {len(df) - len(perp_df)} non-active)")
+            elif 'type' in df.columns:
                 perp_df = df[df['type'] == 'FFWCSX'].copy()
             else:
                 perp_df = df.copy()
@@ -320,11 +324,11 @@ class KuCoinExchange(BaseExchange):
                 self.logger.error("Failed to fetch KuCoin contracts")
                 return pd.DataFrame()
             
-            # Filter for perpetual contracts
+            # Filter for active perpetual contracts only
             contracts = contracts_data['data']
-            perpetuals = [c for c in contracts if c.get('type') == 'FFWCSX']
+            perpetuals = [c for c in contracts if c.get('type') == 'FFWCSX' and c.get('status') == 'Open']
             
-            self.logger.info(f"Found {len(perpetuals)} KuCoin perpetual contracts")
+            self.logger.info(f"Found {len(perpetuals)} active KuCoin perpetual contracts")
             
             # Collect historical data for each contract
             all_historical_data = []
