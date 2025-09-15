@@ -128,17 +128,32 @@ Exchange APIs → Rate Limiter → Normalization → PostgreSQL → FastAPI → 
 ## Database Schema
 
 ```sql
--- Real-time data
-exchange_data (exchange, symbol, base_asset, funding_rate, apr, ...)
+-- Real-time data (current funding rates)
+exchange_data (
+    exchange, symbol, base_asset, quote_asset, 
+    funding_rate, funding_interval_hours, apr,
+    index_price, mark_price, open_interest,
+    contract_type, market_type, timestamp, last_updated
+)
 
--- Historical (30-day window)
-funding_rates_historical (exchange, symbol, funding_time, ...)
+-- Historical data (30-day rolling window)
+funding_rates_historical (
+    exchange, symbol, funding_rate, funding_time,
+    mark_price, funding_interval_hours, created_at
+)
 
--- Statistics (Z-scores)
-funding_statistics (exchange, symbol, current_z_score, current_percentile, ...)
+-- Statistical metrics (Z-scores, percentiles)
+funding_statistics (
+    exchange, symbol, current_z_score, current_percentile,
+    mean_30d, std_dev_30d, median_30d, 
+    min_30d, max_30d, data_points, last_updated
+)
 
--- Contract metadata
-contract_metadata (exchange, symbol, funding_interval_hours, created_at, ...)
+-- Contract metadata (funding intervals, creation time)
+contract_metadata (
+    exchange, symbol, funding_interval_hours, 
+    created_at, last_seen
+)
 ```
 
 ## APR Calculation
@@ -174,8 +189,9 @@ pip install fastapi uvicorn psutil scipy black ruff
 ### Completed
 - **Backend**: Full Z-score calculation with parallel processing (<1s for 1,260 contracts)
 - **Database**: `funding_statistics` table with all statistical metrics
-- **API Endpoints**: `/api/contracts-with-zscores`, `/api/zscore-summary`
-- **Performance**: Batch operations, caching, zone-based updates
+- **API Endpoints**: `/api/contracts-with-zscores`, `/api/zscore-summary`, `/api/health/performance`
+- **Performance**: Batch operations, caching (5s contracts, 10s summary), zone-based updates
+- **Metadata Tracking**: `contract_metadata` table for funding intervals
 
 ### UI Requirements (Not Yet Implemented)
 When implementing `ContractZScoreGrid.tsx`:
@@ -195,6 +211,29 @@ POSTGRES_DATABASE=exchange_data
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres123
 ```
+
+## Common Workflows
+
+### Adding New Exchange
+1. Create new exchange module in `exchanges/` inheriting from `BaseExchange`
+2. Implement `fetch_data()` and `normalize_data()` methods
+3. Add to `exchanges/exchange_factory.py`
+4. Update `config/settings.py` EXCHANGES dict
+5. Add to `config/sequential_config.py` schedule
+6. Test: `python -c "from exchanges.new_exchange import NewExchange; e=NewExchange(); print(len(e.fetch_data()))"`
+
+### Modifying Dashboard Components
+1. Check existing patterns in `dashboard/src/components/`
+2. Use TypeScript with proper types
+3. Follow existing Tailwind CSS patterns (no inline styles)
+4. Test: `cd dashboard && npx tsc --noEmit`
+5. Build: `cd dashboard && npm run build`
+
+### Database Schema Changes
+1. Create migration script in `sql/` directory
+2. Update relevant models in Python code
+3. Test locally first: `python database_tools.py check`
+4. Document changes in schema section
 
 ## Files Never to Commit
 - `.backfill.status`, `.unified_backfill.status` - Progress tracking
@@ -226,3 +265,4 @@ POSTGRES_PASSWORD=postgres123
 ### Utilities
 - `scripts/unified_historical_backfill.py` - 30-day backfill
 - `database_tools.py` - Database management
+- `scripts/test_performance.py` - Z-score performance testing
