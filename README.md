@@ -1,6 +1,6 @@
 # Multi-Exchange Cryptocurrency Funding Rate Dashboard
 
-A comprehensive, production-ready cryptocurrency funding rate tracking system supporting multiple exchanges with real-time updates, historical data analysis, and professional visualization.
+A comprehensive cryptocurrency funding rate tracking system supporting multiple exchanges with real-time updates, historical data analysis, and professional visualization.
 
 ## Table of Contents
 
@@ -21,8 +21,6 @@ A comprehensive, production-ready cryptocurrency funding rate tracking system su
 - [Troubleshooting](#-troubleshooting)
 - [Scripts & Utilities](#-scripts--utilities)
 - [Security Notes](#-security-notes)
-- [Contributing](#-contributing)
-- [License](#-license)
 
 ## 🚀 Quick Start
 
@@ -819,7 +817,7 @@ elif funding_interval_hours == 8:
 13. **Dashboard Refresh Fix**: Eliminated constant refreshing from stuck backfill status
 14. **Funding Interval Display**: Added clear display of funding frequency for each contract
 
-## ⚡ Performance Metrics
+## Performance Metrics
 
 ### System Performance
 - **Total Contracts**: 1,240 across 4 exchanges
@@ -842,7 +840,7 @@ elif funding_interval_hours == 8:
 - **Recovery Time**: <30 seconds after failure
 - **Data Accuracy**: >99.5% validation rate
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -952,41 +950,6 @@ cd dashboard && npm start
 python main.py --loop --interval 30
 ```
 
-## 🔒 Security Notes
-
-### Development Environment
-- Default passwords are for development only
-- Never commit `.env` file to version control
-- Use environment variables for sensitive data
-
-### Production Deployment
-- Change all default passwords
-- Use HTTPS for API endpoints
-- Implement authentication for write operations
-- Enable rate limiting on public endpoints
-- Regular security updates for dependencies
-
-### API Security
-- CORS configured for specific origins
-- Input validation on all endpoints
-- SQL injection prevention via parameterized queries
-- Error messages don't expose sensitive information
-
-## 🤝 Contributing
-
-### Development Setup
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-### Code Style
-- Python: Follow PEP 8
-- TypeScript: Use ESLint configuration
-- SQL: Use uppercase for keywords
-- Documentation: Update README for new features
-
 ### Testing
 ```bash
 # JavaScript tests
@@ -995,17 +958,6 @@ cd dashboard && npm test
 # Test exchange connections
 python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(f'Binance: {len(e.fetch_data())} contracts')"
 ```
-
-## 📝 License
-
-MIT License - See LICENSE file for details
-
-## Support
-
-For issues or questions:
-- Open an issue on GitHub
-- Check existing documentation
-- Review recent updates in docs folder
 
 ---
 
@@ -1038,10 +990,10 @@ python scripts/unified_historical_backfill.py --days 30 --exchanges binance kuco
 
 ---
 
-*Last Updated: 2025-09-03*
+*Last Updated: 2025-09-016*
 *Version: 1.6.0*
 *Total Contracts: 1,240*
 *Active Exchanges: 4*
 *Unique Assets: 600+*
-*Project Status: Production Ready*
+*Project Status: MVP*
 *Current Development: Z-Score statistical monitoring implementation*
