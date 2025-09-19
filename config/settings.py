@@ -129,6 +129,24 @@ HISTORICAL_BASE_BACKOFF = 60
 ZSCORE_CALCULATION_DAYS = 30
 
 # =============================================================================
+# STALE DATA MANAGEMENT SETTINGS
+# =============================================================================
+# Hours after which data is considered stale and contracts may be marked as delisted
+STALE_DATA_THRESHOLD_HOURS = 24  # Mark as inactive after this period
+
+# Hours after which stale data is removed from the database
+STALE_DATA_REMOVAL_HOURS = 48    # Remove from DB after this period
+
+# Enable automatic cleanup of delisted contracts
+AUTO_CLEANUP_DELISTED = True     # Enable automatic cleanup during collection
+
+# Filter inactive contracts from API responses
+FILTER_INACTIVE_CONTRACTS = True  # Hide inactive contracts in API endpoints
+
+# Maximum age of data to serve via API (in days)
+API_MAX_DATA_AGE_DAYS = 3         # Don't serve data older than this
+
+# =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
 # Validation is now done in exchange-data-collector.py when the system starts

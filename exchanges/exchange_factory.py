@@ -9,13 +9,16 @@ import pandas as pd
 import time
 import threading
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+import uuid
+import logging
 from .base_exchange import BaseExchange
 from .backpack_exchange import BackpackExchange
 from .binance_exchange import BinanceExchange
 from .kucoin_exchange import KuCoinExchange
-from .deribit_exchange import DeribitExchange
-from .kraken_exchange import KrakenExchange
 from .hyperliquid_exchange import HyperliquidExchange
+# from .deribit_exchange import DeribitExchange  # Not implemented yet
+# from .kraken_exchange import KrakenExchange  # Not implemented yet
 
 
 class ExchangeFactory:
@@ -27,13 +30,16 @@ class ExchangeFactory:
     def __init__(self, exchange_settings: Dict[str, bool]):
         """
         Initialize the exchange factory.
-        
+
         Args:
             exchange_settings: Dictionary mapping exchange names to enabled status
         """
         self.exchanges: Dict[str, BaseExchange] = {}
         self._create_exchanges(exchange_settings)
-        
+
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+
         # Import settings for sequential collection
         try:
             from config.settings import ENABLE_SEQUENTIAL_COLLECTION, EXCHANGE_COLLECTION_DELAY
@@ -42,7 +48,7 @@ class ExchangeFactory:
         except ImportError:
             self.sequential_mode = False
             self.exchange_delay = 30
-        
+
         # Import sequential configuration if available
         try:
             from config.sequential_config import get_exchange_schedule, get_exchange_delay
@@ -51,10 +57,13 @@ class ExchangeFactory:
         except ImportError:
             self.get_exchange_schedule = None
             self.get_exchange_delay = None
-        
+
         # Store for sequential collection data
         self.sequential_data: Dict[str, pd.DataFrame] = {}
         self.collection_threads: List[threading.Thread] = []
+
+        # Track collection metrics
+        self.last_collection_metrics = {}
     
     def _create_exchanges(self, settings: Dict[str, bool]):
         """
@@ -68,9 +77,9 @@ class ExchangeFactory:
             'backpack': BackpackExchange,
             'binance': BinanceExchange,
             'kucoin': KuCoinExchange,
-            'deribit': DeribitExchange,
-            'kraken': KrakenExchange,
             'hyperliquid': HyperliquidExchange,
+            # 'deribit': DeribitExchange,  # Not implemented yet
+            # 'kraken': KrakenExchange,  # Not implemented yet
             # Add new exchanges here as they become available
             # 'new_exchange': NewExchangeClass,
         }
@@ -128,29 +137,133 @@ class ExchangeFactory:
     
     def _process_exchanges_parallel(self) -> pd.DataFrame:
         """
-        Process all exchanges in parallel (original behavior).
-        
+        Process all exchanges in TRUE parallel using ThreadPoolExecutor.
+
         Returns:
-            Combined DataFrame from all exchanges
+            Combined DataFrame from all exchanges with batch tracking
         """
+        # Generate unique batch ID and timestamp for this collection
+        batch_id = str(uuid.uuid4())[:8]  # Short ID for readability
+        batch_timestamp = datetime.now(timezone.utc)
+
+        print(f"\n[Parallel Collection] Starting batch {batch_id} at {batch_timestamp.strftime('%H:%M:%S.%f')[:-3]} UTC")
+        print(f"[Parallel Collection] Processing {len(self.get_enabled_exchanges())} exchanges simultaneously...")
+
+        # Reset metrics
+        self.last_collection_metrics = {
+            'batch_id': batch_id,
+            'batch_timestamp': batch_timestamp,
+            'exchanges': {},
+            'total_duration_ms': 0,
+            'success_count': 0,
+            'failure_count': 0
+        }
+
+        collection_start = time.time()
         all_data = []
-        
-        for exchange in self.get_enabled_exchanges():
-            try:
-                data = exchange.process_data()
-                if not data.empty:
-                    all_data.append(data)
-            except Exception as e:
-                print(f"X Error processing {exchange.name}: {str(e)}")
-        
+
+        # Use ThreadPoolExecutor for TRUE parallel processing
+        with ThreadPoolExecutor(max_workers=10, thread_name_prefix="Exchange") as executor:
+            # Submit all exchanges for parallel processing
+            future_to_exchange = {}
+            for exchange in self.get_enabled_exchanges():
+                future = executor.submit(self._collect_exchange_data_with_timing,
+                                       exchange, batch_id, batch_timestamp)
+                future_to_exchange[future] = exchange
+
+            # Collect results as they complete with timeout
+            for future in as_completed(future_to_exchange, timeout=30):
+                exchange = future_to_exchange[future]
+                try:
+                    data, duration_ms = future.result(timeout=15)
+
+                    # Track metrics
+                    self.last_collection_metrics['exchanges'][exchange.name] = {
+                        'duration_ms': duration_ms,
+                        'record_count': len(data) if not data.empty else 0,
+                        'status': 'success'
+                    }
+
+                    if not data.empty:
+                        # Add batch tracking columns
+                        data['batch_id'] = batch_id
+                        data['collection_timestamp'] = batch_timestamp
+                        all_data.append(data)
+                        self.last_collection_metrics['success_count'] += 1
+                        print(f"  [OK] {exchange.name}: {len(data)} contracts in {duration_ms:.0f}ms")
+                    else:
+                        print(f"  [!] {exchange.name}: No data retrieved in {duration_ms:.0f}ms")
+
+                except TimeoutError:
+                    self.last_collection_metrics['exchanges'][exchange.name] = {
+                        'duration_ms': 15000,
+                        'record_count': 0,
+                        'status': 'timeout'
+                    }
+                    self.last_collection_metrics['failure_count'] += 1
+                    print(f"  [X] {exchange.name}: TIMEOUT after 15s")
+                    self.logger.error(f"Exchange {exchange.name} timed out after 15 seconds")
+
+                except Exception as e:
+                    self.last_collection_metrics['exchanges'][exchange.name] = {
+                        'duration_ms': 0,
+                        'record_count': 0,
+                        'status': 'error',
+                        'error': str(e)
+                    }
+                    self.last_collection_metrics['failure_count'] += 1
+                    print(f"  [X] {exchange.name}: ERROR - {str(e)[:50]}")
+                    self.logger.error(f"Exchange {exchange.name} failed: {str(e)}")
+
+        # Calculate total collection time
+        collection_duration = (time.time() - collection_start) * 1000
+        self.last_collection_metrics['total_duration_ms'] = collection_duration
+
         # Combine all data
         if all_data:
             combined_df = pd.concat(all_data, ignore_index=True)
             combined_df = combined_df.sort_values(['exchange', 'symbol'])
             combined_df = combined_df.reset_index(drop=True)
+
+            print(f"\n[Parallel Collection] Completed in {collection_duration:.0f}ms")
+            print(f"  - Total contracts: {len(combined_df)}")
+            print(f"  - Successful exchanges: {self.last_collection_metrics['success_count']}")
+            print(f"  - Failed exchanges: {self.last_collection_metrics['failure_count']}")
+            print(f"  - Batch ID: {batch_id}")
+
+            # Remove batch tracking columns before returning for database compatibility
+            # These columns are useful for arbitrage but not stored in database
+            if 'batch_id' in combined_df.columns:
+                combined_df = combined_df.drop(columns=['batch_id'])
+            if 'collection_timestamp' in combined_df.columns:
+                combined_df = combined_df.drop(columns=['collection_timestamp'])
+
             return combined_df
         else:
+            print(f"\n[Parallel Collection] WARNING: No data collected from any exchange")
             return self._get_empty_dataframe()
+
+    def _collect_exchange_data_with_timing(self, exchange: BaseExchange, batch_id: str, batch_timestamp: datetime):
+        """
+        Collect data from an exchange with timing metrics.
+
+        Args:
+            exchange: Exchange instance to collect from
+            batch_id: Unique identifier for this collection batch
+            batch_timestamp: Timestamp when collection started
+
+        Returns:
+            Tuple of (DataFrame, duration_ms)
+        """
+        start_time = time.time()
+        try:
+            data = exchange.process_data()
+            duration_ms = (time.time() - start_time) * 1000
+            return data, duration_ms
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            self.logger.error(f"Error collecting from {exchange.name}: {e}")
+            raise
     
     def _process_exchanges_sequential(self) -> pd.DataFrame:
         """
@@ -249,14 +362,14 @@ class ExchangeFactory:
     def _get_empty_dataframe(self) -> pd.DataFrame:
         """
         Get an empty DataFrame with unified columns.
-        
+
         Returns:
             Empty DataFrame with standard columns
         """
         unified_columns = [
-            'exchange', 'symbol', 'base_asset', 'quote_asset', 
-            'funding_rate', 'funding_interval_hours', 'apr', 'index_price', 
-            'mark_price', 'open_interest', 
+            'exchange', 'symbol', 'base_asset', 'quote_asset',
+            'funding_rate', 'funding_interval_hours', 'apr', 'index_price',
+            'mark_price', 'open_interest',
             'contract_type', 'market_type'
         ]
         return pd.DataFrame(columns=unified_columns)
@@ -273,7 +386,7 @@ class ExchangeFactory:
     def add_exchange(self, name: str, exchange_class: type, enabled: bool = True):
         """
         Add a new exchange to the factory.
-        
+
         Args:
             name: Name of the exchange
             exchange_class: Exchange class (must inherit from BaseExchange)
@@ -281,6 +394,40 @@ class ExchangeFactory:
         """
         if not issubclass(exchange_class, BaseExchange):
             raise ValueError(f"Exchange class must inherit from BaseExchange")
-        
+
         self.exchanges[name] = exchange_class(enabled=enabled)
-        print(f"OK Added exchange: {name} (enabled: {enabled})") 
+        print(f"OK Added exchange: {name} (enabled: {enabled})")
+
+    def get_collection_metrics(self) -> Dict:
+        """
+        Get metrics from the last collection run.
+
+        Returns:
+            Dictionary containing collection performance metrics
+        """
+        return self.last_collection_metrics
+
+    def print_collection_summary(self):
+        """
+        Print a formatted summary of the last collection metrics.
+        """
+        if not self.last_collection_metrics:
+            print("No collection metrics available yet.")
+            return
+
+        metrics = self.last_collection_metrics
+        print("\n" + "="*60)
+        print("COLLECTION PERFORMANCE SUMMARY")
+        print("="*60)
+        print(f"Batch ID: {metrics.get('batch_id', 'N/A')}")
+        print(f"Timestamp: {metrics.get('batch_timestamp', 'N/A')}")
+        print(f"Total Duration: {metrics.get('total_duration_ms', 0):.0f}ms")
+        print(f"Success Rate: {metrics.get('success_count', 0)}/{len(metrics.get('exchanges', {}))}")
+        print("\nExchange Details:")
+        print("-"*40)
+
+        for exchange_name, exchange_metrics in metrics.get('exchanges', {}).items():
+            status_icon = "[OK]" if exchange_metrics['status'] == 'success' else "[X]"
+            print(f"{status_icon} {exchange_name:15} {exchange_metrics['duration_ms']:>8.0f}ms   {exchange_metrics['record_count']:>4} records")
+
+        print("="*60) 

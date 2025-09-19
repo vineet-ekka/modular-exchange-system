@@ -11,6 +11,8 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
   const location = useLocation();
   const isSettingsPage = location.pathname === '/settings';
   const isDashboard = location.pathname === '/';
+  const isUIKit = location.pathname === '/ui-kit';
+  const isArbitrage = location.pathname === '/arbitrage';
 
   return (
     <header className="bg-white border-b border-light-border shadow-md">
@@ -38,6 +40,24 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
                 Dashboard
               </button>
             )}
+            {!isArbitrage && (
+              <button
+                onClick={() => navigate('/arbitrage')}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors shadow-sm flex items-center space-x-2"
+              >
+                <span>💱</span>
+                <span>Arbitrage</span>
+              </button>
+            )}
+            {!isUIKit && (
+              <button
+                onClick={() => navigate('/ui-kit')}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors shadow-sm flex items-center space-x-2"
+              >
+                <span>🎨</span>
+                <span>UI Kit</span>
+              </button>
+            )}
             {!isSettingsPage && (
               <button
                 onClick={() => navigate('/settings')}
@@ -47,7 +67,7 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
                 <span>Settings</span>
               </button>
             )}
-            <ShutdownHeaderButton 
+            <ShutdownHeaderButton
               className="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg transition-colors shadow-sm"
             />
           </div>

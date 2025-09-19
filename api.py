@@ -316,13 +316,16 @@ async def get_funding_rates(
     """
     Get funding rates with optional filters and sorting.
     """
+    from config.settings import API_MAX_DATA_AGE_DAYS
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     try:
         # Build query with filters, include 30-day statistics from funding_statistics
+        # IMPORTANT: Filter out inactive contracts and stale data
         query = """
-            SELECT 
+            SELECT
                 ed.exchange,
                 ed.symbol,
                 ed.base_asset,
@@ -344,12 +347,17 @@ async def get_funding_rates(
                 fs.current_percentile,
                 fs.current_percentile_apr
             FROM exchange_data ed
-            LEFT JOIN funding_statistics fs 
+            LEFT JOIN funding_statistics fs
                 ON ed.exchange = fs.exchange AND ed.symbol = fs.symbol
+            LEFT JOIN contract_metadata cm
+                ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
             WHERE 1=1
+            -- Filter out inactive contracts and stale data
+            AND (cm.is_active = true OR cm.is_active IS NULL)
+            AND ed.last_updated > NOW() - INTERVAL '%s days'
         """
-        params = []
-        
+        params = [API_MAX_DATA_AGE_DAYS]  # Start with the stale data filter parameter
+
         # Apply exchange filter if provided
         if exchange:
             query += " AND LOWER(ed.exchange) = LOWER(%s)"
@@ -835,42 +843,60 @@ async def get_funding_rates_grid():
     Get funding rates grouped by asset across all exchanges.
     Returns a simplified grid view with one row per asset.
     """
+    from config.settings import API_MAX_DATA_AGE_DAYS
+
     conn = get_db_connection()
     cur = conn.cursor()
     
     try:
         # Query to get latest funding rate per asset across all exchanges
         # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
-        # Also get the most common funding interval for each asset-exchange pair
+        # Also get z-scores from funding_statistics table
         cur.execute("""
             WITH latest_rates AS (
-                SELECT DISTINCT ON (COALESCE(base_asset, symbol), exchange)
-                    COALESCE(base_asset, symbol) as base_asset,
-                    exchange,
-                    funding_rate,
-                    apr,
-                    funding_interval_hours,
-                    last_updated
-                FROM exchange_data
-                WHERE (base_asset IS NOT NULL OR (exchange = 'hyperliquid' AND symbol IS NOT NULL))
-                    AND funding_rate IS NOT NULL
-                ORDER BY COALESCE(base_asset, symbol), exchange, last_updated DESC
+                SELECT DISTINCT ON (COALESCE(ed.base_asset, ed.symbol), ed.exchange)
+                    COALESCE(ed.base_asset, ed.symbol) as base_asset,
+                    ed.exchange,
+                    ed.symbol,
+                    ed.funding_rate,
+                    ed.apr,
+                    ed.funding_interval_hours,
+                    ed.last_updated,
+                    fs.current_z_score,
+                    fs.current_percentile,
+                    fs.mean_30d,
+                    fs.std_dev_30d
+                FROM exchange_data ed
+                LEFT JOIN funding_statistics fs
+                    ON ed.exchange = fs.exchange AND ed.symbol = fs.symbol
+                LEFT JOIN contract_metadata cm
+                    ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+                WHERE (ed.base_asset IS NOT NULL OR (ed.exchange = 'hyperliquid' AND ed.symbol IS NOT NULL))
+                    AND ed.funding_rate IS NOT NULL
+                    -- Filter out inactive contracts and stale data
+                    AND (cm.is_active = true OR cm.is_active IS NULL)
+                    AND ed.last_updated > NOW() - INTERVAL %s
+                ORDER BY COALESCE(ed.base_asset, ed.symbol), ed.exchange, ed.last_updated DESC
             )
-            SELECT 
+            SELECT
                 base_asset,
                 json_object_agg(
-                    exchange, 
+                    exchange,
                     json_build_object(
                         'funding_rate', funding_rate,
                         'apr', apr,
-                        'funding_interval_hours', funding_interval_hours
+                        'funding_interval_hours', funding_interval_hours,
+                        'z_score', current_z_score,
+                        'percentile', current_percentile,
+                        'mean_30d', mean_30d,
+                        'std_dev_30d', std_dev_30d
                     )
                 ) as exchange_rates
             FROM latest_rates
             GROUP BY base_asset
             ORDER BY base_asset
-        """)
-        
+        """, (f'{API_MAX_DATA_AGE_DAYS} days',))
+
         results = cur.fetchall()
         
         # Format response
@@ -881,13 +907,17 @@ async def get_funding_rates_grid():
                 'exchanges': {}
             }
             
-            # Convert exchange rates
+            # Convert exchange rates with z-score data
             if row['exchange_rates']:
                 for exchange, rates in row['exchange_rates'].items():
                     asset_data['exchanges'][exchange] = {
                         'funding_rate': float(rates['funding_rate']) if rates['funding_rate'] else None,
                         'apr': float(rates['apr']) if rates['apr'] else None,
-                        'funding_interval_hours': int(rates['funding_interval_hours']) if rates.get('funding_interval_hours') else None
+                        'funding_interval_hours': int(rates['funding_interval_hours']) if rates.get('funding_interval_hours') else None,
+                        'z_score': float(rates['z_score']) if rates.get('z_score') else None,
+                        'percentile': float(rates['percentile']) if rates.get('percentile') else None,
+                        'mean_30d': float(rates['mean_30d']) if rates.get('mean_30d') else None,
+                        'std_dev_30d': float(rates['std_dev_30d']) if rates.get('std_dev_30d') else None
                     }
             
             grid_data.append(asset_data)
@@ -903,6 +933,83 @@ async def get_funding_rates_grid():
     finally:
         cur.close()
         return_db_connection(conn)
+
+@app.get("/api/arbitrage/opportunities")
+async def get_arbitrage_opportunities(
+    min_spread: float = Query(0.001, description="Minimum spread to consider (0.001 = 0.1%)"),
+    top_n: int = Query(20, ge=1, le=100, description="Number of top opportunities to return")
+):
+    """
+    Get arbitrage opportunities by comparing funding rates across exchanges.
+    Returns opportunities where you can long on one exchange and short on another
+    to capture the funding rate spread.
+    """
+    try:
+        # Get the funding rates grid data
+        grid_response = await get_funding_rates_grid()
+        funding_data = grid_response['data']
+
+        # Import the scanner
+        from utils.arbitrage_scanner import get_top_opportunities
+
+        # Find opportunities
+        result = get_top_opportunities(
+            funding_data=funding_data,
+            top_n=top_n,
+            min_spread=min_spread
+        )
+
+        return {
+            'opportunities': result['opportunities'],
+            'statistics': result['statistics'],
+            'parameters': {
+                'min_spread': min_spread,
+                'top_n': top_n
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/arbitrage/opportunities-v2")
+async def get_contract_level_arbitrage_opportunities(
+    min_spread: float = Query(0.001, description="Minimum spread to consider (0.001 = 0.1%)"),
+    top_n: int = Query(20, ge=1, le=100, description="Number of top opportunities to return")
+):
+    """
+    Get contract-specific arbitrage opportunities with correct Z-scores.
+    This endpoint returns the exact contracts to trade, not just assets and exchanges.
+    Each contract's Z-score corresponds to that specific contract.
+
+    Returns:
+        - Specific contract symbols (e.g., BTCUSDT, XBTUSDTM)
+        - Correct Z-scores for each individual contract
+        - Exact trading pairs to execute
+    """
+    try:
+        # Import the new contract-level scanner
+        from utils.arbitrage_scanner import calculate_contract_level_arbitrage
+
+        # Find contract-level opportunities
+        result = calculate_contract_level_arbitrage(
+            min_spread=min_spread,
+            top_n=top_n
+        )
+
+        return {
+            'opportunities': result['opportunities'],
+            'statistics': result['statistics'],
+            'parameters': {
+                'min_spread': min_spread,
+                'top_n': top_n
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'version': 'v2-contract-level'
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/historical-funding-by-asset/{asset}")
 async def get_historical_funding_by_asset(
@@ -1079,9 +1186,9 @@ async def get_historical_funding_by_contract(
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         
-        # Get historical data for this specific contract
+        # Get historical data for this specific contract (case-insensitive for exchange)
         query_historical = """
-            SELECT 
+            SELECT
                 exchange,
                 symbol,
                 base_asset,
@@ -1091,7 +1198,7 @@ async def get_historical_funding_by_contract(
                 funding_interval_hours,
                 mark_price
             FROM funding_rates_historical
-            WHERE exchange = %s 
+            WHERE exchange ILIKE %s
                 AND symbol = %s
                 AND funding_time >= %s
                 AND funding_time <= %s
@@ -1100,9 +1207,9 @@ async def get_historical_funding_by_contract(
         cur.execute(query_historical, (exchange, symbol, start_date, end_date))
         historical_results = cur.fetchall()
         
-        # Also get the most recent data from main table
+        # Also get the most recent data from main table (case-insensitive for exchange)
         query_recent = """
-            SELECT 
+            SELECT
                 exchange,
                 symbol,
                 base_asset,
@@ -1113,7 +1220,7 @@ async def get_historical_funding_by_contract(
                 mark_price,
                 open_interest
             FROM exchange_data
-            WHERE exchange = %s 
+            WHERE exchange ILIKE %s
                 AND symbol = %s
             LIMIT 1
         """
@@ -1630,15 +1737,20 @@ async def get_contracts_with_zscores(
     sort: str = Query("zscore_abs", enum=["zscore_abs", "zscore_asc", "zscore_desc", "contract", "exchange"]),
     min_abs_zscore: Optional[float] = Query(None, ge=0, le=4),
     exchanges: Optional[str] = Query(None, description="Comma-separated list of exchanges"),
+    exchange: Optional[str] = Query(None, description="Single exchange filter (for compatibility)"),
     search: Optional[str] = Query(None, description="Search term for contract names")
 ):
     """
     Get all contracts with Z-score statistics with 5-second caching.
     Returns EXACTLY 1,240 contracts as specified in Z_score.md lines 344-387.
     """
+    # Merge exchange and exchanges parameters for compatibility
+    if exchange and not exchanges:
+        exchanges = exchange
+
     # Generate cache key from parameters
     cache_key = CacheKeys.contracts_with_zscores(exchanges, search, min_abs_zscore, sort)
-    
+
     # Check cache first
     cached_result = api_cache.get(cache_key, ttl_seconds=5)
     if cached_result is not None:
@@ -1683,8 +1795,9 @@ async def get_contracts_with_zscores(
         
         if exchanges:
             exchange_list = exchanges.split(',')
-            base_query += " AND fs.exchange IN %s"
-            params.append(tuple(exchange_list))
+            # Use case-insensitive matching with ILIKE and ANY
+            base_query += " AND LOWER(fs.exchange) = ANY(ARRAY[%s]::text[])"
+            params.append([ex.lower() for ex in exchange_list])
         
         if search:
             base_query += " AND (fs.symbol ILIKE %s OR fs.base_asset ILIKE %s)"

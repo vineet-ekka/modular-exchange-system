@@ -200,37 +200,44 @@ class ContractMetadataManager:
             self.db_connection.rollback()
             return 0
     
-    def detect_delistings(self, inactive_threshold_hours: int = 24) -> List[Tuple[str, str]]:
+    def detect_delistings(self, inactive_threshold_hours: int = None) -> List[Tuple[str, str]]:
         """
-        Detect contracts that are in metadata but no longer in exchange_data.
-        
+        Detect contracts with stale data that should be marked as delisted.
+
         Args:
-            inactive_threshold_hours: Hours since last seen to consider delisted
-            
+            inactive_threshold_hours: Hours since last data update to consider delisted
+
         Returns:
             List of (exchange, symbol) tuples for delisted contracts
         """
         try:
+            # Use configured threshold if not provided
+            if inactive_threshold_hours is None:
+                from config.settings import STALE_DATA_THRESHOLD_HOURS
+                inactive_threshold_hours = STALE_DATA_THRESHOLD_HOURS
+            # Check for contracts where data hasn't been updated recently
+            # This catches both missing contracts and contracts with stale data
             query = """
             SELECT cm.exchange, cm.symbol
             FROM contract_metadata cm
+            LEFT JOIN exchange_data ed ON cm.exchange = ed.exchange AND cm.symbol = ed.symbol
             WHERE cm.is_active = true
-            AND NOT EXISTS (
-                SELECT 1 FROM exchange_data ed
-                WHERE ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+            AND (
+                ed.symbol IS NULL  -- Contract no longer exists in exchange_data
+                OR ed.last_updated < NOW() - INTERVAL '%s hours'  -- Or data is stale
             )
             """
-            
-            self.cursor.execute(query)
+
+            self.cursor.execute(query, (inactive_threshold_hours,))
             potentially_delisted = self.cursor.fetchall()
-            
+
             if potentially_delisted:
-                self.logger.warning(f"Detected {len(potentially_delisted)} potentially delisted contracts")
+                self.logger.warning(f"Detected {len(potentially_delisted)} contracts with stale/missing data")
                 for exchange, symbol in potentially_delisted[:5]:  # Log first 5
-                    self.logger.warning(f"  Delisted: {exchange} - {symbol}")
-            
+                    self.logger.warning(f"  Stale/Delisted: {exchange} - {symbol}")
+
             return potentially_delisted
-            
+
         except Exception as e:
             self.logger.error(f"Error detecting delistings: {e}")
             return []
@@ -277,38 +284,42 @@ class ContractMetadataManager:
     def update_existing_contracts(self) -> int:
         """
         Update metadata for existing contracts (funding intervals, last_seen, etc).
-        
+        Only updates last_seen_at if the data is actually fresh.
+
         Returns:
             Number of contracts updated
         """
         try:
             # Update funding intervals and last_seen timestamps
+            # CRITICAL: Only update last_seen_at with actual data timestamp, not CURRENT_TIMESTAMP
             query = """
             UPDATE contract_metadata cm
-            SET 
+            SET
                 funding_interval_hours = ed.funding_interval_hours,
                 base_asset = ed.base_asset,
-                last_seen_at = CURRENT_TIMESTAMP,
+                last_seen_at = ed.last_updated,  -- Use actual data timestamp!
                 last_validated = CURRENT_TIMESTAMP
             FROM exchange_data ed
-            WHERE cm.exchange = ed.exchange 
+            WHERE cm.exchange = ed.exchange
             AND cm.symbol = ed.symbol
+            AND ed.last_updated > NOW() - INTERVAL '1 hour'  -- Only if data is fresh
             AND (
                 cm.funding_interval_hours != ed.funding_interval_hours
                 OR cm.base_asset IS DISTINCT FROM ed.base_asset
+                OR cm.last_seen_at < ed.last_updated  -- Only update if newer data
                 OR cm.last_validated < CURRENT_TIMESTAMP - INTERVAL '1 hour'
             )
             """
-            
+
             self.cursor.execute(query)
             updated = self.cursor.rowcount
-            
+
             if updated > 0:
                 self.logger.info(f"Updated metadata for {updated} contracts")
-            
+
             self.db_connection.commit()
             return updated
-            
+
         except Exception as e:
             self.logger.error(f"Error updating existing contracts: {e}")
             self.db_connection.rollback()

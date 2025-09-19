@@ -94,8 +94,11 @@ class ExchangeDataSystem:
             
             # Step 6: Sync contract metadata (NEW)
             self._sync_contract_metadata()
-            
-            # Step 7: Check data completeness (hourly)
+
+            # Step 7: Cleanup stale data from inactive contracts
+            self._cleanup_stale_data()
+
+            # Step 8: Check data completeness (hourly)
             self._check_data_completeness()
             
             print("\n" + "="*60)
@@ -213,6 +216,82 @@ class ExchangeDataSystem:
             self.logger.error(f"Metadata sync error: {e}")
             print(f"! Metadata sync error: {e}")
     
+    def _cleanup_stale_data(self):
+        """Remove stale data for inactive contracts from exchange_data table."""
+        from config.settings import AUTO_CLEANUP_DELISTED, STALE_DATA_REMOVAL_HOURS
+
+        if not AUTO_CLEANUP_DELISTED:
+            return  # Skip if cleanup is disabled
+
+        print("\n7. Cleaning up stale data...")
+
+        try:
+            # Get configuration from settings
+            stale_threshold_hours = STALE_DATA_REMOVAL_HOURS
+
+            # Query to remove stale data for inactive contracts
+            query = """
+            DELETE FROM exchange_data ed
+            USING contract_metadata cm
+            WHERE ed.exchange = cm.exchange
+            AND ed.symbol = cm.symbol
+            AND cm.is_active = false
+            AND ed.last_updated < NOW() - INTERVAL '%s hours'
+            RETURNING ed.exchange, ed.symbol
+            """
+
+            # Use psycopg2 directly since db_manager doesn't have get_connection
+            import psycopg2
+            conn = psycopg2.connect(
+                host='localhost',
+                port=5432,
+                database='exchange_data',
+                user='postgres',
+                password='postgres123'
+            )
+            cursor = conn.cursor()
+            cursor.execute(query, (stale_threshold_hours,))
+            removed = cursor.fetchall()
+            conn.commit()
+
+            if removed:
+                print(f"- Removed {len(removed)} stale entries from inactive contracts")
+                for exchange, symbol in removed[:5]:  # Show first 5
+                    print(f"  Removed: {exchange} - {symbol}")
+                if len(removed) > 5:
+                    print(f"  ... and {len(removed) - 5} more")
+
+            # Also remove orphaned entries (not in metadata at all)
+            orphan_query = """
+            DELETE FROM exchange_data ed
+            WHERE NOT EXISTS (
+                SELECT 1 FROM contract_metadata cm
+                WHERE cm.exchange = ed.exchange AND cm.symbol = ed.symbol
+            )
+            AND ed.last_updated < NOW() - INTERVAL '%s hours'
+            RETURNING ed.exchange, ed.symbol
+            """
+
+            cursor.execute(orphan_query, (stale_threshold_hours,))
+            orphans = cursor.fetchall()
+            conn.commit()
+
+            if orphans:
+                print(f"- Removed {len(orphans)} orphaned entries")
+
+            cursor.close()
+            conn.close()
+
+            if not removed and not orphans:
+                print("OK No stale data to clean up")
+            else:
+                total_cleaned = len(removed) + len(orphans)
+                print(f"OK Cleaned up {total_cleaned} stale entries")
+
+        except Exception as e:
+            self.logger.error(f"Cleanup error: {e}")
+            print(f"! Cleanup error: {e}")
+
     def _check_data_completeness(self, force: bool = False):
         """Check data completeness periodically and log warnings."""
         # Only check every hour to avoid overhead

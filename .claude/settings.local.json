@@ -48,7 +48,15 @@
       "Bash(pip install:*)",
       "Bash(docker start:*)",
       "WebSearch",
-      "WebFetch(domain:docs.openbb.co)"
+      "WebFetch(domain:docs.openbb.co)",
+      "Bash(bash:*)",
+      "WebFetch(domain:api.hyperliquid.xyz)",
+      "Bash(tasklist:*)",
+      "Bash(netstat:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(py scripts:*)",
+      "WebFetch(domain:docs.backpack.exchange)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

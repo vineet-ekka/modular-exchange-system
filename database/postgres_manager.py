@@ -278,15 +278,35 @@ class PostgresManager:
             
             # Prepare data
             df_copy = df.copy()
-            
+
+            # Remove batch tracking columns if they exist (defensive programming)
+            # These columns are used for tracking during collection but not stored in database
+            columns_to_drop = ['batch_id', 'collection_timestamp', 'volume_24h', 'premium']
+            for col in columns_to_drop:
+                if col in df_copy.columns:
+                    df_copy = df_copy.drop(columns=[col])
+                    self.logger.debug(f"Removed tracking column '{col}' before database insertion")
+
             # Add timestamp if not present
             if 'timestamp' not in df_copy.columns:
                 df_copy['timestamp'] = datetime.now(timezone.utc)
-            
+
             # Add last_updated for main table
             if not historical and 'last_updated' not in df_copy.columns:
                 df_copy['last_updated'] = datetime.now(timezone.utc)
-            
+
+            # Double-check to ensure batch_id is truly removed
+            # Filter out any columns that shouldn't be in the database
+            valid_columns = ['exchange', 'symbol', 'base_asset', 'quote_asset',
+                           'funding_rate', 'funding_interval_hours', 'apr',
+                           'index_price', 'mark_price', 'open_interest',
+                           'contract_type', 'market_type', 'timestamp', 'last_updated',
+                           'volume_24h_quote', 'index_mark_spread']
+
+            # Only keep columns that exist in both the dataframe and valid_columns
+            columns_to_keep = [col for col in df_copy.columns if col in valid_columns or historical]
+            df_copy = df_copy[columns_to_keep]
+
             # Convert DataFrame to list of tuples
             columns = df_copy.columns.tolist()
             values = df_copy.values.tolist()

@@ -256,13 +256,13 @@ def start_api_server():
         # Start API server in background
         if sys.platform == "win32":
             subprocess.Popen(
-                ["python", "api.py"],
+                [sys.executable, "api.py"],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=Path.cwd()
             )
         else:
             subprocess.Popen(
-                ["python", "api.py"],
+                [sys.executable, "api.py"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 cwd=Path.cwd()
@@ -331,7 +331,7 @@ def start_data_collector(quiet=True):
     
     try:
         # Use 30-second intervals for real-time updates
-        cmd = ["python", "main.py", "--loop", "--interval", "30"]
+        cmd = [sys.executable, "main.py", "--loop", "--interval", "30"]
         if quiet:
             cmd.append("--quiet")
         
@@ -402,7 +402,7 @@ def start_background_historical_backfill():
                 
                 # Run the backfill script silently
                 result = subprocess.run(
-                    ["python", "run_backfill.py", "--days", "30"],
+                    [sys.executable, "run_backfill.py", "--days", "30"],
                     capture_output=True,
                     text=True,
                     cwd=Path.cwd()
