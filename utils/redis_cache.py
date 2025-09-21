@@ -162,13 +162,17 @@ class RedisCache:
         if not self.redis_client:
             # Try to reconnect
             return self._connect()
-        
+
         try:
             self.redis_client.ping()
             return True
         except:
             self.redis_client = None
             return self._connect()
+
+    def is_available(self) -> bool:
+        """Check if Redis cache is available for use."""
+        return self.redis_client is not None
 
 
 class SimpleCache:

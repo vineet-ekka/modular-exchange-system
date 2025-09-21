@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Fragment } from 'react';
+import React, { useState, useEffect, Fragment, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { fetchContractsByAsset, ContractDetails } from '../../services/api';
@@ -118,46 +118,89 @@ const AssetFundingGrid: React.FC = () => {
     return () => clearTimeout(fetchTimer);
   }, [searchTerm, gridData]);
 
-  // Filter data based on search - now includes contract search
+  // Filter data based on search - improved logic
   const filteredData = gridData.filter(item => {
+    if (!searchTerm) return true; // Show all if no search term
+
     const searchLower = searchTerm.toLowerCase();
-    
-    // First check if asset name matches
+
+    // Check if asset name matches
     if (item.asset.toLowerCase().includes(searchLower)) {
       return true;
     }
-    
-    // Then check if any contract matches
+
+    // Check if any exchange name matches
+    const exchangeNames = Object.keys(item.exchanges);
+    if (exchangeNames.some(exchange => exchange.toLowerCase().includes(searchLower))) {
+      return true;
+    }
+
+    // Check common contract patterns (even without fetched data)
+    // Most contracts follow pattern: ASSET-USDT, ASSETUSDT, ASSET-PERP, etc.
+    const commonPatterns = [
+      `${item.asset.toLowerCase()}usdt`,
+      `${item.asset.toLowerCase()}-usdt`,
+      `${item.asset.toLowerCase()}usd`,
+      `${item.asset.toLowerCase()}-usd`,
+      `${item.asset.toLowerCase()}perp`,
+      `${item.asset.toLowerCase()}-perp`,
+      `${item.asset.toLowerCase()}_perp`
+    ];
+
+    if (commonPatterns.some(pattern => pattern.includes(searchLower))) {
+      return true;
+    }
+
+    // Finally, check actual contract data if available
     const contracts = contractsData[item.asset] || [];
-    const hasMatchingContract = contracts.some(contract => 
-      contract.symbol.toLowerCase().includes(searchLower) ||
-      contract.exchange.toLowerCase().includes(searchLower)
-    );
-    
-    return hasMatchingContract;
+    if (contracts.length > 0) {
+      const hasMatchingContract = contracts.some(contract =>
+        contract.symbol.toLowerCase().includes(searchLower) ||
+        contract.exchange.toLowerCase().includes(searchLower)
+      );
+      if (hasMatchingContract) return true;
+    }
+
+    return false;
   });
 
   // Auto-expand assets when their contracts match the search
   useEffect(() => {
-    if (searchTerm && contractsData) {
+    if (searchTerm && searchTerm.length >= 2) {
       const assetsToExpand = new Set<string>();
-      
-      gridData.forEach(item => {
-        const contracts = contractsData[item.asset] || [];
-        const hasMatchingContract = contracts.some(contract =>
-          contract.symbol.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-        
-        if (hasMatchingContract && !item.asset.toLowerCase().includes(searchTerm.toLowerCase())) {
-          assetsToExpand.add(item.asset);
+      const searchLower = searchTerm.toLowerCase();
+
+      filteredData.forEach(item => {
+        // Auto-expand if search term looks like a contract symbol
+        // but doesn't match the asset name directly
+        if (!item.asset.toLowerCase().includes(searchLower)) {
+          // Check if this might be a contract search
+          if (searchLower.includes('usdt') ||
+              searchLower.includes('usd') ||
+              searchLower.includes('perp') ||
+              searchLower.includes('-') ||
+              searchLower.includes('_')) {
+
+            // Check if we have contract data for this asset
+            const contracts = contractsData[item.asset] || [];
+            if (contracts.length > 0) {
+              const hasMatchingContract = contracts.some(contract =>
+                contract.symbol.toLowerCase().includes(searchLower)
+              );
+
+              if (hasMatchingContract) {
+                assetsToExpand.add(item.asset);
+              }
+            }
+          }
         }
       });
-      
+
       setAutoExpandedAssets(assetsToExpand);
     } else {
       setAutoExpandedAssets(new Set());
     }
-  }, [searchTerm, contractsData, gridData]);
+  }, [searchTerm, contractsData, filteredData]);
 
   // Sort data
   const sortedData = [...filteredData].sort((a, b) => {
@@ -312,7 +355,7 @@ const AssetFundingGrid: React.FC = () => {
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg border border-light-border overflow-hidden">
+    <div className="bg-white shadow-sm border-y border-light-border overflow-hidden">
       {/* Header */}
       <div className="px-6 py-4 border-b border-light-border bg-light-bg-secondary">
         <div className="flex justify-between items-center">
@@ -329,6 +372,8 @@ const AssetFundingGrid: React.FC = () => {
             <span className="text-sm text-text-secondary">
               {sortedData.length} assets{searchTerm && autoExpandedAssets.size > 0 ? ` (${autoExpandedAssets.size} with matching contracts)` : ''}
             </span>
+
+
             <input
               type="text"
               placeholder="Search assets or contracts..."
@@ -341,7 +386,7 @@ const AssetFundingGrid: React.FC = () => {
       </div>
 
       {/* Grid Table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto relative">
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
@@ -389,11 +434,12 @@ const AssetFundingGrid: React.FC = () => {
                   </td>
                   {exchanges.map(exchange => {
                     const rate = item.exchanges[exchange]?.funding_rate ?? null;
+
                     return (
                       <td
                         key={exchange}
                         className={clsx(
-                          'px-4 py-3 text-center whitespace-nowrap text-sm',
+                          'px-4 py-3 text-center whitespace-nowrap text-sm relative',
                           getRateBgColor(rate)
                         )}
                       >
@@ -414,25 +460,25 @@ const AssetFundingGrid: React.FC = () => {
                             <p className="text-sm text-gray-500 mt-2">Loading contracts...</p>
                           </div>
                         ) : contractsData[item.asset] && contractsData[item.asset].length > 0 ? (
-                          <div className="p-4 overflow-x-auto">
-                            <table className="w-full text-xs">
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-xs">
                               <thead className="bg-gray-100">
                                 <tr>
-                                  <th className="px-3 py-2 text-left font-medium text-gray-700">Contract Name</th>
-                                  <th className="px-3 py-2 text-left font-medium text-gray-700">Exchange Name</th>
-                                  <th className="px-3 py-2 text-left font-medium text-gray-700">Base Asset</th>
-                                  <th className="px-3 py-2 text-left font-medium text-gray-700">Quote Asset</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Interval</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Funding Rate</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">APR</th>
-                                  <th className="px-3 py-2 text-right font-medium text-gray-700">Open Interest</th>
-                                  <th className="px-3 py-2 text-right font-medium text-gray-700">Mark Price</th>
-                                  <th className="px-3 py-2 text-right font-medium text-gray-700">Index Price</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Z-Score</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Percentile</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Mean(30d)</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">StdDev</th>
-                                  <th className="px-3 py-2 text-center font-medium text-gray-700">Actions</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-700 min-w-[120px]">Contract Name</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-700 min-w-[100px]">Exchange Name</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-700 min-w-[80px]">Base Asset</th>
+                                  <th className="px-3 py-2 text-left font-medium text-gray-700 min-w-[80px]">Quote Asset</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[60px]">Interval</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[100px]">Funding Rate</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">APR</th>
+                                  <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[120px]">Open Interest</th>
+                                  <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[100px]">Mark Price</th>
+                                  <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[100px]">Index Price</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">Z-Score</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">Percentile</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">Mean(30d)</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">StdDev</th>
+                                  <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">Actions</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200">
@@ -518,7 +564,7 @@ const AssetFundingGrid: React.FC = () => {
                                 })}
                               </tbody>
                             </table>
-                            <div className="mt-3 text-center">
+                            <div className="p-4 text-center">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();

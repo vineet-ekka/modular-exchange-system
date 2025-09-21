@@ -132,16 +132,67 @@ class PostgresManager:
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_base_asset ON {self.table_name}(base_asset);
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_apr ON {self.table_name}(apr DESC);
             CREATE INDEX IF NOT EXISTS idx_{self.table_name}_timestamp ON {self.table_name}(timestamp DESC);
-            
+
             CREATE INDEX IF NOT EXISTS idx_{self.historical_table_name}_exchange ON {self.historical_table_name}(exchange);
             CREATE INDEX IF NOT EXISTS idx_{self.historical_table_name}_symbol ON {self.historical_table_name}(symbol);
             CREATE INDEX IF NOT EXISTS idx_{self.historical_table_name}_base_asset ON {self.historical_table_name}(base_asset);
             CREATE INDEX IF NOT EXISTS idx_{self.historical_table_name}_timestamp ON {self.historical_table_name}(timestamp DESC);
             """
-            
+
+            # Create streaming data table for WebSocket feeds
+            create_streaming_table = """
+            CREATE TABLE IF NOT EXISTS streaming_data (
+                id SERIAL PRIMARY KEY,
+                exchange VARCHAR(50) NOT NULL,
+                symbol VARCHAR(50) NOT NULL,
+                market_type VARCHAR(20),
+                funding_rate NUMERIC(20, 10),
+                mark_price NUMERIC(20, 10),
+                index_price NUMERIC(20, 10),
+                next_funding_time TIMESTAMP WITH TIME ZONE,
+                stream_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+                server_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(exchange, symbol)
+            );
+            """
+
+            # Create WebSocket connection status table
+            create_connection_table = """
+            CREATE TABLE IF NOT EXISTS websocket_connections (
+                id SERIAL PRIMARY KEY,
+                connection_name VARCHAR(100) NOT NULL UNIQUE,
+                exchange VARCHAR(50) NOT NULL,
+                market_type VARCHAR(20),
+                status VARCHAR(20) NOT NULL,
+                url TEXT,
+                connected_at TIMESTAMP WITH TIME ZONE,
+                disconnected_at TIMESTAMP WITH TIME ZONE,
+                messages_received BIGINT DEFAULT 0,
+                bytes_received BIGINT DEFAULT 0,
+                reconnect_count INTEGER DEFAULT 0,
+                last_message_time TIMESTAMP WITH TIME ZONE,
+                last_error TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+
+            # Create streaming indexes
+            create_streaming_indexes = """
+            CREATE INDEX IF NOT EXISTS idx_streaming_data_exchange_symbol
+                ON streaming_data(exchange, symbol);
+            CREATE INDEX IF NOT EXISTS idx_streaming_data_timestamp
+                ON streaming_data(stream_timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_websocket_connections_status
+                ON websocket_connections(status);
+            """
+
             self.cursor.execute(create_main_table)
             self.cursor.execute(create_historical_table)
             self.cursor.execute(create_indexes)
+            self.cursor.execute(create_streaming_table)
+            self.cursor.execute(create_connection_table)
+            self.cursor.execute(create_streaming_indexes)
             self.connection.commit()
             
             self.logger.info("Database tables created/verified successfully")

@@ -134,6 +134,27 @@ class KuCoinExchange(BaseExchange):
         
         base_assets = df.apply(lambda row: normalize_kucoin_base_asset(row['symbol'], row['baseCurrency']), axis=1)
         
+        # Calculate open interest in USD
+        # KuCoin returns openInterest as contract count, needs conversion to USD
+        def calculate_open_interest_usd(row):
+            try:
+                contracts = float(row.get('openInterest', 0) or 0)
+                multiplier = float(row.get('multiplier', 0) or 0)
+                mark_price = float(row.get('markPrice', 0) or 0)
+                is_inverse = row.get('isInverse', False)
+
+                if is_inverse:
+                    # For inverse contracts: OI_USD = contracts * abs(multiplier)
+                    # The negative multiplier indicates inverse, but we want positive USD value
+                    return contracts * abs(multiplier)
+                else:
+                    # For linear contracts: OI_USD = contracts * multiplier * mark_price
+                    return contracts * multiplier * mark_price
+            except (ValueError, TypeError):
+                return None
+
+        open_interest_usd = df.apply(calculate_open_interest_usd, axis=1)
+
         normalized = pd.DataFrame({
             'exchange': 'KuCoin',
             'symbol': df['symbol'],
@@ -143,7 +164,7 @@ class KuCoinExchange(BaseExchange):
             'funding_interval_hours': pd.to_numeric(df['fundingIntervalHours'], errors='coerce'),
             'index_price': pd.to_numeric(df['indexPrice'], errors='coerce'),
             'mark_price': pd.to_numeric(df['markPrice'], errors='coerce'),
-            'open_interest': pd.to_numeric(df['openInterest'], errors='coerce'),
+            'open_interest': open_interest_usd,
             'contract_type': df['type'] if 'type' in df.columns else 'PERPETUAL',
             'market_type': 'KuCoin Futures',
         })

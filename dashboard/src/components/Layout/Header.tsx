@@ -11,7 +11,6 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
   const location = useLocation();
   const isSettingsPage = location.pathname === '/settings';
   const isDashboard = location.pathname === '/';
-  const isUIKit = location.pathname === '/ui-kit';
   const isArbitrage = location.pathname === '/arbitrage';
 
   return (
@@ -47,15 +46,6 @@ const Header: React.FC<HeaderProps> = ({ lastUpdate }) => {
               >
                 <span>💱</span>
                 <span>Arbitrage</span>
-              </button>
-            )}
-            {!isUIKit && (
-              <button
-                onClick={() => navigate('/ui-kit')}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors shadow-sm flex items-center space-x-2"
-              >
-                <span>🎨</span>
-                <span>UI Kit</span>
               </button>
             )}
             {!isSettingsPage && (

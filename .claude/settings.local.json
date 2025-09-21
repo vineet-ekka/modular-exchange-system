@@ -56,7 +56,9 @@
       "Bash(docker-compose logs:*)",
       "Bash(py scripts:*)",
       "WebFetch(domain:docs.backpack.exchange)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git pull:*)",
+      "Bash(findstr:*)"
     ],
     "deny": []
   }

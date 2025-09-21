@@ -48,6 +48,8 @@ ENABLE_OPEN_INTEREST_FETCH = True
 # Enable/disable fetching funding rate data
 ENABLE_FUNDING_RATE_FETCH = True
 
+# WebSocket functionality has been removed
+
 # Sequential collection mode - stagger exchange API calls to reduce load
 ENABLE_SEQUENTIAL_COLLECTION = False
 

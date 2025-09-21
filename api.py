@@ -23,6 +23,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from config.settings_manager import SettingsManager
 from database.postgres_manager import PostgresManager
+import config.settings
 from functools import lru_cache
 import hashlib
 from utils.redis_cache import RedisCache, CacheKeys
@@ -167,8 +168,8 @@ DB_CONFIG = {
 # Initialize connection pool for better performance
 try:
     connection_pool = psycopg2.pool.ThreadedConnectionPool(
-        minconn=2,
-        maxconn=10,
+        minconn=5,
+        maxconn=20,
         **DB_CONFIG,
         cursor_factory=RealDictCursor
     )
@@ -849,6 +850,9 @@ async def get_funding_rates_grid():
     cur = conn.cursor()
     
     try:
+        # Query to get latest funding rate per asset across all exchanges
+        # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
+        # Also get z-scores from funding_statistics table
         # Query to get latest funding rate per asset across all exchanges
         # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
         # Also get z-scores from funding_statistics table
@@ -2227,6 +2231,8 @@ async def retry_incomplete_backfill(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket endpoints removed
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,28 +1,29 @@
-# Multi-Exchange Cryptocurrency Funding Rate Dashboard
+# Multi-Exchange Cryptocurrency Funding Rate Dashboard (MVP)
 
-A comprehensive cryptocurrency funding rate tracking system supporting multiple exchanges with real-time updates, historical data analysis, and professional visualization.
+An MVP cryptocurrency funding rate tracking system supporting multiple exchanges with real-time updates and historical data analysis.
+
+**Note: This is a minimum viable product (MVP) for demonstration and development purposes only. Not intended for production use.**
 
 ## Table of Contents
 
-- [Quick Start](#-quick-start)
-- [System Overview](#-system-overview)
-- [Architecture](#-architecture)
-- [Features](#-features)
-- [Exchange Coverage](#-exchange-coverage)
-- [Installation & Setup](#-installation--setup)
-- [Configuration](#-configuration)
-- [API Documentation](#-api-documentation)
-- [Dashboard Features](#-dashboard-features)
-- [Project Structure](#-project-structure)
-- [Database Schema](#-database-schema)
-- [Technical Implementation](#-technical-implementation)
-- [Development History](#-development-history)
-- [Performance Metrics](#-performance-metrics)
-- [Troubleshooting](#-troubleshooting)
-- [Scripts & Utilities](#-scripts--utilities)
-- [Security Notes](#-security-notes)
+- [Quick Start](#quick-start)
+- [System Overview](#system-overview)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Exchange Coverage](#exchange-coverage)
+- [Installation & Setup](#installation--setup)
+- [Configuration](#configuration)
+- [API Documentation](#api-documentation)
+- [Dashboard Features](#dashboard-features)
+- [Project Structure](#project-structure)
+- [Database Schema](#database-schema)
+- [Technical Implementation](#technical-implementation)
+- [Development History](#development-history)
+- [Performance Metrics](#performance-metrics)
+- [Troubleshooting](#troubleshooting)
+- [Scripts & Utilities](#scripts--utilities)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### One-Command Launch
 ```bash
@@ -49,27 +50,27 @@ This automatically:
 - **API Docs**: http://localhost:8000/docs
 - **PostgreSQL**: localhost:5432
 
-## 🎯 System Overview
+## System Overview
 
 ### Core Capabilities
 - **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, Backpack, and Hyperliquid
 - **Sequential Collection**: Staggered API calls to manage rate limits (0s, 30s, 120s, 180s delays)
-- **Asset Aggregation**: 600+ unique assets consolidated from 1,238 individual contracts
+- **Asset Aggregation**: 556 unique assets consolidated from 1,297 individual contracts
 - **Historical Analysis**: 30-day rolling window with 269,381+ historical records
-- **Professional Dashboard**: React-based interface with real-time updates and interactive charts
+- **Dashboard**: React-based interface with real-time updates and charts
 - **APR Calculations**: Automatic annualized percentage rate computation
 - **Data Export**: CSV export functionality for historical data
 
 ### System Statistics
-- **Total Contracts**: 1,240 perpetual futures
+- **Total Contracts**: 1,297 perpetual futures
 - **Active Exchanges**: 4 (Binance, KuCoin, Backpack, Hyperliquid)
-- **Unique Assets**: 600+ with cross-exchange comparison
+- **Unique Assets**: 556 with cross-exchange comparison
 - **Update Frequency**: 30-second real-time refresh
 - **Historical Coverage**: 30-day rolling window
-- **API Endpoints**: 17+ RESTful endpoints
-- **Database Tables**: 2 (real-time and historical)
+- **API Endpoints**: 25+ RESTful endpoints
+- **Database Tables**: 5 (real-time, historical, statistics, metadata, arbitrage)
 
-## 🏗 Architecture
+## Architecture
 
 ### System Architecture Diagram
 ```
@@ -87,19 +88,20 @@ This automatically:
               ▼
 ┌─────────────────────────────────────────────┐
 │         Data Processing                     │
-│  (Normalization, APR calc, Validation)      │
+│  (Normalization, APR calc, Z-scores)        │
 └─────────────┬───────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────┐
 │         PostgreSQL Database                 │
-│  (Real-time & Historical tables)            │
+│  (5 tables: real-time, historical,          │
+│   statistics, metadata, arbitrage)          │
 └─────────────┬───────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────┐
 │         FastAPI Backend                     │
-│  (RESTful API, Settings Management)         │
+│  (RESTful API, Redis Cache, Arbitrage)      │
 └─────────────┬───────────────────────────────┘
               │
               ▼
@@ -138,50 +140,53 @@ This automatically:
 #### 5. Frontend Dashboard
 - **React 19**: Modern JavaScript framework
 - **TypeScript**: Type-safe development
-- **Tailwind CSS**: Professional styling
+- **Tailwind CSS**: Utility-first CSS framework
 - **Recharts**: Interactive data visualization
 
-## ✨ Features
+## Features
 
 ### Real-time Data Collection
-- ✅ 30-second update cycle for all exchanges
-- ✅ Sequential collection mode to manage API rate limits
-- ✅ Parallel collection mode for development
-- ✅ Automatic retry with exponential backoff
-- ✅ Health monitoring and status reporting
+- 30-second update cycle for all exchanges
+- Sequential collection mode to manage API rate limits
+- Parallel collection mode for development
+- Automatic retry with exponential backoff
+- Health monitoring and status reporting
 
 ### Historical Data Management
-- ✅ 30-day rolling window of funding rates
-- ✅ Synchronized data windows across exchanges
-- ✅ Gap filling for missing data points
-- ✅ Materialized views for performance
-- ✅ Automated backfill scripts
+- 30-day rolling window of funding rates
+- Synchronized data windows across exchanges
+- Gap filling for missing data points
+- Materialized views for performance
+- Automated backfill scripts
 
 ### Dashboard Features
-- ✅ Asset-based grid view (600+ assets)
-- ✅ Expandable rows showing individual contracts
-- ✅ **Funding Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
-- ✅ **Enhanced Search**: Search both assets AND contracts simultaneously
-- ✅ **Auto-expansion**: Automatically expands assets when contracts match search
-- ✅ **Search Highlighting**: Matching contracts highlighted in blue
-- ✅ Multi-contract historical charts
-- ✅ Live funding rate ticker
-- ✅ Countdown timer to next funding
-- ✅ Color-coded rates (green positive, red negative)
-- ✅ Advanced sorting and filtering
-- ✅ CSV export functionality
-- ✅ Settings management interface
-- ✅ Backfill progress indicator
+- Asset-based grid view (556 assets)
+- Expandable rows showing individual contracts
+- **Funding Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
+- **Enhanced Search**: Search both assets AND contracts simultaneously
+- **Auto-expansion**: Automatically expands assets when contracts match search
+- **Search Highlighting**: Matching contracts highlighted in blue
+- Multi-contract historical charts
+- Live funding rate ticker
+- Countdown timer to next funding
+- Color-coded rates (green positive, red negative)
+- Advanced sorting and filtering
+- CSV export functionality
+- Settings management interface
+- Backfill progress indicator
+- Z-score statistical analysis
+- Cross-exchange arbitrage detection
 
 ### API Capabilities
-- ✅ RESTful endpoints for all data
-- ✅ Real-time and historical data access
-- ✅ Aggregated statistics
-- ✅ Asset-based queries
-- ✅ Settings management endpoints
-- ✅ Health check monitoring
+- RESTful endpoints for all data
+- Real-time and historical data access
+- Aggregated statistics with Z-scores
+- Asset-based queries
+- Cross-exchange arbitrage opportunities
+- Settings management endpoints
+- Health and performance monitoring
 
-## 📊 Exchange Coverage
+## Exchange Coverage
 
 ### Active Exchanges
 
@@ -213,9 +218,9 @@ This automatically:
 - **Kraken**: 353 contracts (module available)
 - **Deribit**: 20 contracts (module available)
 
-**Total Active**: 1,240 perpetual contracts across 600+ unique assets
+**Total Active**: 1,297 perpetual contracts across 556 unique assets
 
-## 🛠 Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - **Python 3.8+** - [Download](https://python.org)
@@ -273,7 +278,7 @@ cd dashboard && npm start
 python main.py --loop --interval 30 --quiet
 ```
 
-## 🔧 Configuration
+## Configuration
 
 ### Main Settings (`config/settings.py`)
 ```python
@@ -320,7 +325,7 @@ EXCHANGE_SCHEDULE = [
 ACTIVE_SCHEDULE = "default"
 ```
 
-## 📡 API Documentation
+## API Documentation
 
 ### Core Endpoints
 
@@ -341,6 +346,10 @@ ACTIVE_SCHEDULE = "default"
 | `/api/top-apr/{limit}` | GET | Top APR contracts |
 | `/api/group-by-asset` | GET | Grouped by base asset |
 | `/api/funding-sparkline/{symbol}` | GET | Sparkline data |
+| `/api/contracts-with-zscores` | GET | All contracts with Z-score data |
+| `/api/zscore-summary` | GET | Z-score summary statistics |
+| `/api/arbitrage/opportunities` | GET | Cross-exchange arbitrage opportunities |
+| `/api/health/performance` | GET | System performance metrics |
 
 #### Settings Management
 | Endpoint | Method | Description |
@@ -410,7 +419,7 @@ Response:
 }
 ```
 
-## 📈 Dashboard Features
+## Dashboard Features
 
 ### Asset Grid View
 - **Consolidated Display**: 600+ assets across all exchanges
@@ -447,7 +456,7 @@ Response:
 - **Backup/Restore**: Configuration management
 - **Import/Export**: JSON configuration files
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 modular_exchange_system/
@@ -529,7 +538,7 @@ modular_exchange_system/
 └── shutdown_dashboard.py          # Clean shutdown utility
 ```
 
-## 💾 Database Schema
+## Database Schema
 
 ### Main Table: exchange_data
 ```sql
@@ -588,7 +597,7 @@ FROM funding_rates_historical
 GROUP BY exchange, symbol, DATE(funding_time);
 ```
 
-## 🔬 Technical Implementation
+## Technical Implementation
 
 ### APR Calculation Formula
 ```python
@@ -667,7 +676,7 @@ elif funding_interval_hours == 8:
 - Efficient query joins between tables
 - Async request handling
 
-## 📚 Development History
+## Development History
 
 ### Phase Timeline
 
@@ -680,7 +689,7 @@ elif funding_interval_hours == 8:
 
 #### Phase 5: Asset Grid View (2025-08-08)
 - Simplified from 1400+ contracts to 600+ assets
-- CoinGlass-style professional interface
+- CoinGlass-inspired interface design
 - One-command startup implementation
 
 #### Phase 6: Enhanced Historical Page (2025-08-11)
@@ -791,15 +800,22 @@ elif funding_interval_hours == 8:
 - X-axis improvements for charts
 - Performance optimizations
 
-#### Phase 30: Z-Score Statistical Monitoring (2025-09-03 - In Progress)
-- **Statistical Analysis**: Implementing Z-score calculations for funding rates
-- **New Database Table**: `funding_statistics` with 30-day rolling statistics
-- **Flat Contract Display**: 1,240 contracts in single list with virtual scrolling
-- **React-Window Integration**: Performance optimization for large dataset
-- **Blue-Orange Heat Map**: Statistical deviation visualization (no red/green)
-- **Dynamic Row Heights**: 40px standard, 120px for extreme deviations (|Z| ≥ 2.0)
-- **API Endpoint**: `/api/contracts-with-zscores` for flat contract list
+#### Phase 30: Z-Score Statistical Monitoring (2025-09-03 - Completed)
+- **Statistical Analysis**: Z-score calculations for all funding rates
+- **New Database Tables**: `funding_statistics`, `contract_metadata`
+- **Zone-based Updates**: Active zones (|Z|>2) update every 30s, stable every 2min
+- **Parallel Processing**: <1s calculation for all 1,297 contracts
+- **API Endpoints**: `/api/contracts-with-zscores`, `/api/zscore-summary`
 - **Percentile Rankings**: Distribution-independent statistical measures
+- **Performance Optimized**: <100ms API response times
+
+#### Phase 31: Arbitrage Detection System (2025-09-15 - Completed)
+- **Cross-Exchange Scanning**: Real-time arbitrage opportunity detection
+- **APR Spread Calculation**: Automatic spread and profit calculations
+- **New Database Table**: `arbitrage_spreads` for opportunity tracking
+- **API Endpoint**: `/api/arbitrage/opportunities` with filtering
+- **Historical Tracking**: Spread statistics over time
+- **Redis Caching**: 5s TTL for performance optimization
 
 ### Critical Fixes Implemented
 1. **Funding Interval Detection**: Fixed 333 contracts with incorrect APR
@@ -820,7 +836,7 @@ elif funding_interval_hours == 8:
 ## Performance Metrics
 
 ### System Performance
-- **Total Contracts**: 1,240 across 4 exchanges
+- **Total Contracts**: 1,297 across 4 exchanges
 - **Unique Assets**: 600+ consolidated view
 - **Update Cycle**: 30 seconds
 - **API Response**: <100ms typical
@@ -834,11 +850,11 @@ elif funding_interval_hours == 8:
 - **Database Size**: ~5GB with full history
 - **Memory Usage**: <500MB typical
 
-### Reliability
-- **Uptime**: 99.9%+ availability
-- **Error Rate**: <0.1% API failures
-- **Recovery Time**: <30 seconds after failure
-- **Data Accuracy**: >99.5% validation rate
+### Current Status (MVP)
+- **Uptime**: System runs continuously when started
+- **Error Recovery**: Basic retry mechanisms in place
+- **Data Collection**: Functional across 4 exchanges
+- **Known Limitations**: This is an MVP with basic functionality
 
 ## Troubleshooting
 
@@ -900,7 +916,7 @@ Check for asset-specific issues in logs. The system may be retrying failed reque
 - On Windows, check if Python is in PATH
 - Ensure all required dependencies are installed: `pip install -r requirements.txt`
 
-## 📜 Scripts & Utilities
+## Scripts & Utilities
 
 ### Data Collection
 ```bash
@@ -990,10 +1006,10 @@ python scripts/unified_historical_backfill.py --days 30 --exchanges binance kuco
 
 ---
 
-*Last Updated: 2025-09-016*
-*Version: 1.6.0*
-*Total Contracts: 1,240*
+*Last Updated: 2025-09-21*
+*Version: MVP*
+*Total Contracts: 1,297*
 *Active Exchanges: 4*
-*Unique Assets: 600+*
-*Project Status: MVP*
-*Current Development: Z-Score statistical monitoring implementation*
+*Unique Assets: 556*
+*Project Status: MVP - Not production ready*
+*Note: This is a minimum viable product for demonstration and development purposes*

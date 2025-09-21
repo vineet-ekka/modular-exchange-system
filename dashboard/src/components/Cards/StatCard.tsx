@@ -1,45 +1,127 @@
 import React from 'react';
 import clsx from 'clsx';
+import ModernCard from '../Modern/ModernCard';
 
 interface StatCardProps {
   title: string;
   value: string | number;
   change?: number;
+  changeLabel?: string;
   subtitle?: string;
-  icon: string;
-  color?: 'blue' | 'green' | 'purple' | 'indigo';
+  icon?: React.ReactNode;
+  trend?: 'up' | 'down' | 'neutral';
+  loading?: boolean;
+  onClick?: () => void;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ 
-  title, 
-  value, 
-  change, 
-  subtitle, 
-  icon, 
-  color = 'blue' 
+const StatCard: React.FC<StatCardProps> = ({
+  title,
+  value,
+  change,
+  changeLabel,
+  subtitle,
+  icon,
+  trend,
+  loading = false,
+  onClick,
 }) => {
-  // Using simpler card style matching the reference image
+  // Determine trend from change if not explicitly provided
+  const actualTrend = trend || (change !== undefined ? (change > 0 ? 'up' : change < 0 ? 'down' : 'neutral') : undefined);
+
+  const trendColors = {
+    up: 'text-success',
+    down: 'text-danger',
+    neutral: 'text-gray-500',
+  };
+
+  const trendIcons = {
+    up: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+      </svg>
+    ),
+    down: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" />
+      </svg>
+    ),
+    neutral: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
+      </svg>
+    ),
+  };
+
+  if (loading) {
+    return (
+      <ModernCard variant="elevated" padding="lg">
+        <div className="space-y-3">
+          <div className="skeleton h-4 w-24" />
+          <div className="skeleton h-8 w-32" />
+          <div className="skeleton h-3 w-16" />
+        </div>
+      </ModernCard>
+    );
+  }
+
   return (
-    <div className="bg-white rounded-xl p-6 shadow-lg border border-light-border">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-text-secondary text-sm font-medium">{title}</p>
-          <p className="text-3xl font-bold mt-2 text-text-primary">{value || '—'}</p>
+    <ModernCard
+      variant="elevated"
+      padding="lg"
+      hover={!!onClick}
+      onClick={onClick}
+      className="group"
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-text-secondary">
+              {title}
+            </p>
+            {icon && (
+              <span className="text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                {icon}
+              </span>
+            )}
+          </div>
+
+          <p className="text-3xl font-bold mt-2 text-text-primary tracking-tight">
+            {value || '—'}
+          </p>
+
           {subtitle && (
-            <p className="text-text-muted text-xs mt-1">{subtitle}</p>
-          )}
-          {change !== undefined && (
-            <p className={clsx(
-              'text-sm mt-2',
-              change > 0 ? 'text-funding-positive' : 'text-funding-negative'
-            )}>
-              {change > 0 ? '↑' : '↓'} {Math.abs(change)}%
+            <p className="text-xs text-text-tertiary mt-1">
+              {subtitle}
             </p>
           )}
+
+          {(change !== undefined || changeLabel) && actualTrend && (
+            <div className={clsx(
+              'flex items-center gap-1 mt-3',
+              trendColors[actualTrend]
+            )}>
+              {trendIcons[actualTrend]}
+              <span className="text-sm font-medium">
+                {change !== undefined && (
+                  <>{change > 0 ? '+' : ''}{change}%</>
+                )}
+                {changeLabel && (
+                  <span className="ml-1 text-xs">{changeLabel}</span>
+                )}
+              </span>
+            </div>
+          )}
         </div>
-        {icon && <div className="text-4xl opacity-30 text-text-muted">{icon}</div>}
+
+        {icon && !change && !changeLabel && (
+          <div className="text-primary/10">
+            <div className="text-4xl">
+              {icon}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </ModernCard>
   );
 };
 
