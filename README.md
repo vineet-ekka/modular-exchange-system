@@ -302,7 +302,9 @@ EXCHANGES = {
     'binance': True,      # 547 contracts
     'kucoin': True,       # 477 contracts
     'backpack': True,     # 43 contracts
-    'hyperliquid': True,  # 171 contracts (1-hour funding)
+    'hyperliquid': True,  # 173 contracts (1-hour funding)
+    'aster': True,        # 102 contracts (4-hour funding)
+    'drift': True,        # 61 contracts (1-hour funding)
     'deribit': False,     # Ready but disabled
     'kraken': False       # Ready but disabled
 }
@@ -330,10 +332,12 @@ HISTORICAL_WINDOW_DAYS = 30         # Default window size
 ```python
 # Custom collection schedules
 EXCHANGE_SCHEDULE = [
-    ("binance", 0),      # Starts immediately
-    ("kucoin", 30),      # 30s delay
-    ("backpack", 120),   # 120s delay
-    ("hyperliquid", 180) # 180s delay
+    ("binance", 0),       # Starts immediately
+    ("kucoin", 30),       # 30s delay
+    ("backpack", 120),    # 120s delay
+    ("hyperliquid", 180), # 180s delay
+    ("aster", 210),       # 210s delay
+    ("drift", 240)        # 240s delay
 ]
 
 # Schedule presets: "default", "fast", "conservative", "priority"
@@ -530,8 +534,10 @@ modular_exchange_system/
 │   ├── kucoin_exchange.py         # KuCoin integration
 │   ├── backpack_exchange.py       # Backpack integration
 │   ├── hyperliquid_exchange.py    # Hyperliquid integration
-│   ├── kraken_exchange.py         # Kraken (ready)
-│   ├── deribit_exchange.py        # Deribit (ready)
+│   ├── aster_exchange.py          # Aster DEX integration
+│   ├── drift_exchange.py          # Drift Solana DEX integration
+│   ├── kraken_exchange.py         # Kraken (ready but disabled)
+│   ├── deribit_exchange.py        # Deribit (ready but disabled)
 │   └── exchange_factory.py        # Factory pattern manager
 │
 ├── scripts/                       # Utility scripts
@@ -720,6 +726,26 @@ elif funding_interval_hours == 8:
 - Contract naming: Simple asset names (e.g., "BTC" not "BTCUSDT")
 - **Base Asset Normalization**: Handles `k` prefix (e.g., `kPEPE` → `PEPE`)
 
+#### Aster
+- DEX with 4-hour funding intervals
+- Async/parallel fetching for improved performance
+- USDT-margined perpetual contracts
+- Rate limit: 40 requests/second maximum
+- **Base Asset Normalization**: Handles multiple prefixes:
+  - `1000` prefix (e.g., `1000FLOKI` → `FLOKI`)
+  - `k` prefix for thousands (e.g., `kX` → `X`)
+  - Numerical prefix removal for clean asset names
+
+#### Drift
+- Solana-based DEX with 1-hour funding intervals
+- No strict rate limits
+- Excludes betting markets (perpetuals only)
+- **Symbol Format**: XXX-PERP format requires suffix removal
+- **Base Asset Normalization**: Handles special prefixes:
+  - `1M` prefix for millions (e.g., `1MBONK` → `BONK`, `1MPEPE` → `PEPE`)
+  - `1K` prefix for thousands (e.g., `1KMEW` → `MEW`, `1KWEN` → `WEN`)
+  - `-PERP` suffix removal for all contracts
+
 ### Performance Optimizations
 
 #### Database
@@ -881,6 +907,15 @@ elif funding_interval_hours == 8:
 - **API Endpoint**: `/api/arbitrage/opportunities` with filtering
 - **Historical Tracking**: Spread statistics over time
 - **Redis Caching**: 5s TTL for performance optimization
+
+#### Phase 32: Aster and Drift Exchange Integration (2025-09-20 - Completed)
+- **Aster DEX Integration**: 102 perpetual contracts with 4-hour funding intervals
+- **Drift Solana DEX**: 61 perpetual contracts with 1-hour funding intervals
+- **Symbol Normalization**: Handle Aster prefixes (1000FLOKI → FLOKI, kX → X)
+- **Drift Normalization**: Remove -PERP suffix, handle 1M/1K prefixes (1MBONK → BONK)
+- **Rate Limiting**: Aster at 40 req/s max, Drift with no strict limits
+- **Parallel Fetching**: Optimized async/await for both exchanges
+- **Total Contracts**: System expanded to 1,403 across 6 exchanges
 
 #### Phase 33: Redis Cache Implementation (2025-09-23 - Completed)
 - **Redis Integration**: High-performance caching layer
@@ -1071,6 +1106,11 @@ cd dashboard && npm test
 
 # Test exchange connections
 python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(f'Binance: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.kucoin_exchange import KuCoinExchange; e=KuCoinExchange(); print(f'KuCoin: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.backpack_exchange import BackpackExchange; e=BackpackExchange(); print(f'Backpack: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.hyperliquid_exchange import HyperliquidExchange; e=HyperliquidExchange(); print(f'Hyperliquid: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.aster_exchange import AsterExchange; e=AsterExchange(); print(f'Aster: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.drift_exchange import DriftExchange; e=DriftExchange(); print(f'Drift: {len(e.fetch_data())} contracts')"
 ```
 
 ---
