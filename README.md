@@ -1,6 +1,6 @@
 # Multi-Exchange Cryptocurrency Funding Rate Dashboard (MVP)
 
-An MVP cryptocurrency funding rate tracking system supporting multiple exchanges with real-time updates and historical data analysis.
+An MVP cryptocurrency funding rate tracking system supporting 6 exchanges with real-time updates, historical data analysis, and cross-exchange arbitrage detection.
 
 **Note: This is a minimum viable product (MVP) for demonstration and development purposes only. Not intended for production use.**
 
@@ -53,22 +53,24 @@ This automatically:
 ## System Overview
 
 ### Core Capabilities
-- **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, Backpack, and Hyperliquid
+- **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, Backpack, Hyperliquid, Aster, and Drift
 - **Sequential Collection**: Staggered API calls to manage rate limits (0s, 30s, 120s, 180s delays)
-- **Asset Aggregation**: 556 unique assets consolidated from 1,297 individual contracts
-- **Historical Analysis**: 30-day rolling window with 269,381+ historical records
+- **Asset Aggregation**: 600+ unique assets consolidated from 1,403 individual contracts
+- **Historical Analysis**: 30-day rolling window with automated backfill and gap detection
 - **Dashboard**: React-based interface with real-time updates and charts
 - **APR Calculations**: Automatic annualized percentage rate computation
 - **Data Export**: CSV export functionality for historical data
+- **Redis Caching**: High-performance caching with 5s TTL for contracts, 10s for summaries
 
 ### System Statistics
-- **Total Contracts**: 1,297 perpetual futures
-- **Active Exchanges**: 4 (Binance, KuCoin, Backpack, Hyperliquid)
-- **Unique Assets**: 556 with cross-exchange comparison
+- **Total Contracts**: 1,403 perpetual futures
+- **Active Exchanges**: 6 (Binance, KuCoin, Backpack, Hyperliquid, Aster, Drift)
+- **Unique Assets**: 600+ with cross-exchange comparison
 - **Update Frequency**: 30-second real-time refresh
 - **Historical Coverage**: 30-day rolling window
 - **API Endpoints**: 25+ RESTful endpoints
-- **Database Tables**: 5 (real-time, historical, statistics, metadata, arbitrage)
+- **Database Tables**: 6 (real-time, historical, statistics, metadata, arbitrage, funding_statistics)
+- **Infrastructure**: PostgreSQL database, Redis cache, pgAdmin web interface
 
 ## Architecture
 
@@ -76,7 +78,8 @@ This automatically:
 ```
 ┌─────────────────────────────────────────────┐
 │          Exchange APIs                      │
-│  (Binance, KuCoin, Backpack, Hyperliquid)  │
+│  (Binance, KuCoin, Backpack, Hyperliquid,  │
+│         Aster, Drift)                       │
 └─────────────┬───────────────────────────────┘
               │
               ▼
@@ -94,14 +97,15 @@ This automatically:
               ▼
 ┌─────────────────────────────────────────────┐
 │         PostgreSQL Database                 │
-│  (5 tables: real-time, historical,          │
-│   statistics, metadata, arbitrage)          │
+│  (6 tables: real-time, historical, statistics,│
+│   metadata, arbitrage, funding_statistics)    │
 └─────────────┬───────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────┐
 │         FastAPI Backend                     │
-│  (RESTful API, Redis Cache, Arbitrage)      │
+│  (RESTful API, Redis Cache, Arbitrage,      │
+│   WebSocket)                                │
 └─────────────┬───────────────────────────────┘
               │
               ▼
@@ -176,6 +180,7 @@ This automatically:
 - Backfill progress indicator
 - Z-score statistical analysis
 - Cross-exchange arbitrage detection
+- WebSocket real-time updates
 
 ### API Capabilities
 - RESTful endpoints for all data
@@ -185,6 +190,7 @@ This automatically:
 - Cross-exchange arbitrage opportunities
 - Settings management endpoints
 - Health and performance monitoring
+- WebSocket endpoint for real-time updates
 
 ## Exchange Coverage
 
@@ -214,11 +220,21 @@ This automatically:
 |-----------------|-----------|------------|----------|
 | 1 hour | 173 | 100% | Unique DEX with hourly funding |
 
+#### Aster (102 contracts)
+| Funding Interval | Contracts | Rate Limit | Features |
+|-----------------|-----------|------------|----------|
+| 4 hours | 102 | 40 req/s | DEX with async/parallel fetching, USDT pairs |
+
+#### Drift (61 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 1 hour | 61 | Solana | Solana-based DEX, excludes betting markets |
+
 ### Ready for Integration
 - **Kraken**: 353 contracts (module available)
 - **Deribit**: 20 contracts (module available)
 
-**Total Active**: 1,297 perpetual contracts across 556 unique assets
+**Total Active**: 1,403 perpetual contracts across 600+ unique assets
 
 ## Installation & Setup
 
@@ -238,8 +254,7 @@ cd modular-exchange-system
 #### 2. Install Dependencies
 ```bash
 # Python dependencies
-pip install -r requirements.txt
-pip install fastapi uvicorn psutil scipy black  # Additional required packages
+pip install -r requirements.txt  # All required packages included
 
 # Dashboard dependencies
 cd dashboard && npm install && cd ..
@@ -252,8 +267,8 @@ cd dashboard && npm install react-window react-window-infinite-loader @types/rea
 ```bash
 docker-compose up -d
 
-# Verify it's running
-docker ps  # Should show exchange_postgres
+# Verify services are running
+docker ps  # Should show exchange_postgres, redis, and pgAdmin
 ```
 
 #### 4. Configure Environment
@@ -370,6 +385,14 @@ ACTIVE_SCHEDULE = "default"
 | `/api/backfill/stop` | POST | Stop backfill |
 | `/api/backfill-status` | GET | Backfill progress |
 | `/api/shutdown` | POST | Clean shutdown |
+
+### System Monitoring & Analytics
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health/performance` | GET | System performance metrics |
+| `/api/statistics/extreme-values` | GET | Statistical outliers and extremes |
+| `/api/statistics/summary` | GET | Overall system statistics |
+| `/api/arbitrage/opportunities-v2` | GET | Paginated arbitrage opportunities with filtering |
 
 ### Request/Response Examples
 
@@ -525,14 +548,11 @@ modular_exchange_system/
 │   ├── rate_limiter.py            # API rate limiting
 │   ├── health_tracker.py          # System health monitoring
 │   ├── health_check.py            # Health status reporting
-│   └── data_validator.py          # Data validation
-│
-├── utils/                         # Utility modules
-│   ├── logger.py                  # Logging configuration
-│   ├── rate_limiter.py            # API rate limiting
-│   ├── health_tracker.py          # System health monitoring
-│   ├── health_check.py            # Health status reporting
-│   └── data_validator.py          # Data validation
+│   ├── data_validator.py          # Data validation
+│   ├── contract_monitor.py        # Contract health monitoring
+│   ├── zscore_calculator.py       # Z-score statistical analysis
+│   ├── arbitrage_scanner.py       # Cross-exchange arbitrage detection
+│   └── redis_cache.py             # Redis caching layer
 │
 ├── database_tools.py              # Consolidated database utilities
 └── shutdown_dashboard.py          # Clean shutdown utility
@@ -595,6 +615,51 @@ SELECT
     COUNT(*) as data_points
 FROM funding_rates_historical
 GROUP BY exchange, symbol, DATE(funding_time);
+```
+
+### Statistical Tables
+
+```sql
+-- Z-score statistics table
+CREATE TABLE funding_statistics (
+    id SERIAL PRIMARY KEY,
+    exchange VARCHAR(50) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
+    current_z_score NUMERIC(10, 4),
+    current_percentile NUMERIC(5, 2),
+    mean_30d NUMERIC(20, 10),
+    std_dev_30d NUMERIC(20, 10),
+    median_30d NUMERIC(20, 10),
+    min_30d NUMERIC(20, 10),
+    max_30d NUMERIC(20, 10),
+    data_points INTEGER,
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(exchange, symbol)
+);
+
+-- Contract metadata table
+CREATE TABLE contract_metadata (
+    id SERIAL PRIMARY KEY,
+    exchange VARCHAR(50) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
+    funding_interval_hours INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP WITH TIME ZONE,
+    UNIQUE(exchange, symbol)
+);
+
+-- Arbitrage spreads table
+CREATE TABLE arbitrage_spreads (
+    id SERIAL PRIMARY KEY,
+    asset VARCHAR(50) NOT NULL,
+    exchange_a VARCHAR(50) NOT NULL,
+    exchange_b VARCHAR(50) NOT NULL,
+    funding_rate_a NUMERIC(20, 10),
+    funding_rate_b NUMERIC(20, 10),
+    apr_spread NUMERIC(20, 10),
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(asset, exchange_a, exchange_b, timestamp)
+);
 ```
 
 ## Technical Implementation
@@ -817,6 +882,13 @@ elif funding_interval_hours == 8:
 - **Historical Tracking**: Spread statistics over time
 - **Redis Caching**: 5s TTL for performance optimization
 
+#### Phase 33: Redis Cache Implementation (2025-09-23 - Completed)
+- **Redis Integration**: High-performance caching layer
+- **TTL Strategy**: 5s for contracts, 10s for summary data
+- **Memory Limit**: 512MB with LRU eviction policy
+- **Fallback**: Graceful degradation to in-memory cache if Redis unavailable
+- **Performance**: <100ms API response times with caching
+
 ### Critical Fixes Implemented
 1. **Funding Interval Detection**: Fixed 333 contracts with incorrect APR
 2. **Multi-Contract Chart Alignment**: Timestamp normalization
@@ -836,12 +908,14 @@ elif funding_interval_hours == 8:
 ## Performance Metrics
 
 ### System Performance
-- **Total Contracts**: 1,297 across 4 exchanges
+- **Total Contracts**: 1,403 across 6 exchanges
 - **Unique Assets**: 600+ consolidated view
-- **Update Cycle**: 30 seconds
-- **API Response**: <100ms typical
+- **Update Cycle**: 30 seconds with sequential collection
+- **API Response**: <100ms with Redis caching
 - **Dashboard Load**: ~2 seconds initial
-- **Chart Rendering**: Smooth with null handling
+- **Chart Rendering**: Smooth with forward-fill normalization
+- **Z-Score Calculation**: <1s for all contracts (parallel processing)
+- **Cache Performance**: 5s TTL contracts, 10s summaries
 
 ### Data Metrics
 - **Historical Records**: 354,749+ total (including 85,368 Hyperliquid records)
@@ -918,6 +992,21 @@ Check for asset-specific issues in logs. The system may be retrying failed reque
 
 ## Scripts & Utilities
 
+### Contract Health Monitoring
+```bash
+# Monitor contract health and detect stale/inactive contracts
+python utils/contract_monitor.py --report-only
+
+# Preview changes without applying them
+python utils/contract_monitor.py --dry-run
+
+# Apply changes to mark inactive contracts
+python utils/contract_monitor.py
+
+# Monitor with custom thresholds (default: 24h stale, 48h inactive)
+python utils/contract_monitor.py --stale-hours 48 --inactive-hours 72
+```
+
 ### Data Collection
 ```bash
 # Single run
@@ -933,7 +1022,16 @@ python main.py --loop --interval 30 --quiet
 python scripts/unified_historical_backfill.py --days 30 --parallel
 
 # Specific exchanges only
-python scripts/unified_historical_backfill.py --days 30 --exchanges binance kucoin
+python scripts/unified_historical_backfill.py --days 30 --exchanges binance,kucoin
+
+# Run hourly at every UTC hour (XX:00) - Continuous mode
+python scripts/unified_historical_backfill.py --days 30 --parallel --loop-hourly
+
+# Backfill arbitrage spreads (improved v2)
+python scripts/backfill_arbitrage_spreads_v2.py --days 30
+
+# Collect arbitrage spread history
+python scripts/collect_spread_history.py
 ```
 
 ### Database Management
@@ -995,7 +1093,10 @@ python database_tools.py clear --quick
 python scripts/unified_historical_backfill.py --days 30 --parallel
 
 # Backfill specific exchanges
-python scripts/unified_historical_backfill.py --days 30 --exchanges binance kucoin
+python scripts/unified_historical_backfill.py --days 30 --exchanges binance,kucoin
+
+# Hourly backfill loop (runs at XX:00 UTC)
+python scripts/unified_historical_backfill.py --days 30 --parallel --loop-hourly
 ```
 
 **System Status Indicators**
@@ -1006,10 +1107,10 @@ python scripts/unified_historical_backfill.py --days 30 --exchanges binance kuco
 
 ---
 
-*Last Updated: 2025-09-21*
+*Last Updated: 2025-12-27*
 *Version: MVP*
-*Total Contracts: 1,297*
-*Active Exchanges: 4*
-*Unique Assets: 556*
+*Total Contracts: 1,403*
+*Active Exchanges: 6*
+*Unique Assets: 600+*
 *Project Status: MVP - Not production ready*
 *Note: This is a minimum viable product for demonstration and development purposes*
