@@ -8,10 +8,10 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   ReferenceLine
 } from 'recharts';
-import LiveFundingTicker from '../Ticker/LiveFundingTicker';
 
 interface HistoricalDataPoint {
   timestamp: string;
@@ -47,11 +47,11 @@ interface QualityMap {
 // REQUIRED: Validation helper classes as per chartmasala.md Section 13.4
 class MetricsValidator {
   static validate(metrics: any[]): void {
-    if (metrics.length !== 7) {
-      throw new Error(`COMPLIANCE VIOLATION: Expected 7 metrics, got ${metrics.length}`);
+    if (metrics.length !== 9) {
+      throw new Error(`COMPLIANCE VIOLATION: Expected 9 metrics, got ${metrics.length}`);
     }
     
-    const required = ['Mark Price', 'Current Funding Rate', 'APR', 
+    const required = ['Contract', 'Interval', 'Mark Price', 'Current Rate', 'APR',
                      'Z-Score', 'Percentile', 'Mean', 'Std Dev'];
     const missing = required.filter(m => !metrics.some(metric => 
       metric.label.includes(m)));
@@ -63,8 +63,8 @@ class MetricsValidator {
   
   static validateDOM(): void {
     const metricElements = document.querySelectorAll('[data-metric]');
-    if (metricElements.length !== 7) {
-      throw new Error(`COMPLIANCE VIOLATION: DOM has ${metricElements.length} metrics, expected 7`);
+    if (metricElements.length !== 9) {
+      throw new Error(`COMPLIANCE VIOLATION: DOM has ${metricElements.length} metrics, expected 9`);
     }
   }
 }
@@ -137,6 +137,9 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
   const [dataQuality, setDataQuality] = useState<QualityMap>({});
   const [periodZScore, setPeriodZScore] = useState<number | null>(null);
   const [periodPercentile, setPeriodPercentile] = useState<number | null>(null);
+  const [hasMinimumData, setHasMinimumData] = useState<boolean>(true);
+  const [showAllData, setShowAllData] = useState<boolean>(false);
+  const [showPeriodAverage, setShowPeriodAverage] = useState<boolean>(true);
   
   // REQUIRED: Assess period availability based on data completeness (chartmasala.md Section 2.4)
   const assessPeriodAvailability = useCallback((data: HistoricalDataPoint[], fundingIntervalHours: number): QualityMap => {
@@ -272,26 +275,50 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       setHistoricalData(chronologicalData);
       setFundingInterval(historicalResult.funding_interval_hours || 8);
       setBaseAsset(historicalResult.base_asset || symbol || '');
-      
-      // Assess period availability
-      const quality = assessPeriodAvailability(chronologicalData, historicalResult.funding_interval_hours || 8);
-      setDataQuality(quality);
-      
-      // Determine available periods
-      const available = Object.entries(quality)
-        .filter(([_, info]) => info.enabled)
-        .map(([period, _]) => parseInt(period));
-      setAvailablePeriods(available);
 
-      // Auto-select period - if none meet quality criteria, still show 7-day as fallback
-      if (available.length > 0) {
-        if (!available.includes(timeRange)) {
-          setTimeRange(Math.max(...available));
+      // Calculate data span and determine if we have minimum data for period selection
+      const fundingIntervalHours = historicalResult.funding_interval_hours || 8;
+      const validDataPoints = chronologicalData.filter((d: HistoricalDataPoint) => d.funding_rate !== null).length;
+      const expectedPointsFor7Days = (7 * 24) / fundingIntervalHours;
+
+      // Calculate actual data span in days
+      let dataSpanDays = 0;
+      if (chronologicalData.length > 0) {
+        const earliestDate = new Date(chronologicalData[0].timestamp);
+        const latestDate = new Date(chronologicalData[chronologicalData.length - 1].timestamp);
+        dataSpanDays = (latestDate.getTime() - earliestDate.getTime()) / (24 * 60 * 60 * 1000);
+      }
+
+      // Determine if we should show all data (for newly listed contracts)
+      const hasEnoughData = dataSpanDays >= 7 || validDataPoints >= expectedPointsFor7Days * 0.5;
+      setHasMinimumData(hasEnoughData);
+      setShowAllData(!hasEnoughData);
+
+      if (!hasEnoughData) {
+        // For newly listed contracts, show all available data
+        setAvailablePeriods([]);
+        // Don't change timeRange, but it won't be used when showAllData is true
+      } else {
+        // Assess period availability for contracts with enough data
+        const quality = assessPeriodAvailability(chronologicalData, fundingIntervalHours);
+        setDataQuality(quality);
+
+        // Determine available periods
+        const available = Object.entries(quality)
+          .filter(([_, info]) => info.enabled)
+          .map(([period, _]) => parseInt(period));
+        setAvailablePeriods(available);
+
+        // Auto-select period - if none meet quality criteria, still show 7-day as fallback
+        if (available.length > 0) {
+          if (!available.includes(timeRange)) {
+            setTimeRange(Math.max(...available));
+          }
+        } else if (chronologicalData.length > 0) {
+          // Fallback: show 7-day view even if data quality is poor
+          setAvailablePeriods([7]);
+          setTimeRange(7);
         }
-      } else if (chronologicalData.length > 0) {
-        // Fallback: show 7-day view even if data quality is poor
-        setAvailablePeriods([7]);
-        setTimeRange(7);
       }
       
       // Call onUpdate after successful data fetch
@@ -315,14 +342,16 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchange, symbol, isContractView]); // Fetch only when contract changes
   
-  // Calculate period-specific metrics when timeRange changes
+  // Calculate period-specific metrics when timeRange changes or showing all data
   useEffect(() => {
     if (historicalData.length > 0) {
-      const stats = calculatePeriodStats(historicalData, timeRange);
+      // If showing all data, calculate stats for entire dataset
+      const periodDays = showAllData ? 9999 : timeRange; // Large number to include all data
+      const stats = calculatePeriodStats(historicalData, periodDays);
       setPeriodZScore(stats.zScore);
       setPeriodPercentile(stats.percentile);
     }
-  }, [historicalData, timeRange, calculatePeriodStats]);
+  }, [historicalData, timeRange, showAllData, calculatePeriodStats]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -342,48 +371,53 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       // Validate metrics count
       const metricElements = document.querySelectorAll('[data-metric]');
       if (metricElements.length > 0) {
-        console.assert(metricElements.length === 7, 'VIOLATION: Metric count must be 7');
+        console.assert(metricElements.length === 9, 'VIOLATION: Metric count must be 9');
       }
-      
+
       // Log implementation metadata
       console.log('Chart Implementation Metadata:', IMPLEMENTATION_METADATA);
     }
   }, []);
-  
+
   // Prepare chart data with proper formatting
   const chartData = useMemo(() => {
-    if (timeRange && historicalData.length > 0) {
+    // If showing all data (for newly listed contracts), use all data
+    if (showAllData) {
+      return historicalData;
+    } else if (timeRange && historicalData.length > 0) {
+      // Otherwise, filter by time range
       const now = new Date();
       const cutoffTime = new Date(now.getTime() - timeRange * 24 * 60 * 60 * 1000);
-      return historicalData
-        .filter(d => new Date(d.timestamp) >= cutoffTime)
-        .map(d => ({
-          ...d,
-          // Keep null values for gaps (NO interpolation)
-          funding_rate: d.funding_rate
-        }));
+      return historicalData.filter(d => new Date(d.timestamp) >= cutoffTime);
+    } else {
+      return historicalData;
     }
-    return historicalData;
-  }, [historicalData, timeRange]);
+  }, [historicalData, timeRange, showAllData]);
+
+  // Calculate period average for horizontal reference line
+  const periodAverage = useMemo(() => {
+    const validRates = chartData.filter(d => d.funding_rate !== null);
+    if (validRates.length === 0) return null;
+    return validRates.reduce((sum, d) => sum + d.funding_rate!, 0) / validRates.length;
+  }, [chartData]);
 
   const exportToCSV = () => {
-    if (historicalData.length === 0) return;
-    
+    if (chartData.length === 0) return;
+
     const headers = ['Timestamp', 'Funding Rate (%)', 'APR (%)'];
-    const rows = historicalData.map(item => {
-      return [
-        item.timestamp,
-        item.funding_rate !== null ? item.funding_rate.toFixed(4) : '',
-        item.apr !== null ? item.apr.toFixed(2) : ''
-      ].join(',');
-    });
-    
+
+    const rows = chartData.map(item => [
+      item.timestamp,
+      item.funding_rate !== null ? item.funding_rate.toFixed(4) : '',
+      item.apr !== null ? item.apr.toFixed(2) : ''
+    ].join(','));
+
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const filename = isContractView 
+    const filename = isContractView
       ? `${exchange}_${symbol}_funding_${timeRange}d.csv`
       : `${asset}_funding_${timeRange}d.csv`;
     a.download = filename;
@@ -451,7 +485,7 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       
       switch (format) {
         case 'currency':
-          return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          return `$${value.toLocaleString(undefined, { minimumFractionDigits: 5, maximumFractionDigits: 5 })}`;
         case 'percentage':
           return `${value.toFixed(4)}%`;
         case 'decimal':
@@ -506,24 +540,32 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
               Exchange: {exchange} | Funding Interval: {fundingInterval}h | Base Asset: {baseAsset}
             </p>
           </div>
-          <button
-            onClick={() => navigate('/')}
-            className="px-4 py-2 bg-text-primary text-white hover:bg-gray-800 rounded text-sm transition-colors"
-          >
-            Back to Dashboard
-          </button>
         </div>
       </div>
 
-      {/* REQUIRED: Key Information Display - EXACTLY 7 METRICS (chartmasala.md Section 13.1) */}
+      {/* REQUIRED: Key Information Display - 9 METRICS */}
       <div className="px-6 py-4 border-b border-light-border bg-gray-50">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-4">
-          {/* All 7 metrics in a responsive grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-4">
+          {/* All 9 metrics in a responsive grid */}
+          <div className="metric-item" data-metric="contract">
+            <div className="text-xs sm:text-sm text-gray-500 mb-1">Contract</div>
+            <div className="text-base sm:text-lg font-semibold">
+              {symbol || '--'}
+            </div>
+          </div>
+
+          <div className="metric-item" data-metric="interval">
+            <div className="text-xs sm:text-sm text-gray-500 mb-1">Interval</div>
+            <div className="text-base sm:text-lg font-semibold">
+              {fundingInterval ? `${fundingInterval}h` : '--'}
+            </div>
+          </div>
+
           <div className="metric-item" data-metric="mark-price">
             <div className="text-xs sm:text-sm text-gray-500 mb-1">Mark Price</div>
             <div className="text-base sm:text-lg font-semibold">
               {contractStats?.mark_price
-                ? `$${contractStats.mark_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                ? `$${contractStats.mark_price.toLocaleString(undefined, { minimumFractionDigits: 5, maximumFractionDigits: 5 })}`
                 : '--'}
             </div>
           </div>
@@ -556,7 +598,7 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
           </div>
 
           <div className="metric-item" data-metric="z-score-period">
-            <div className="text-xs sm:text-sm text-gray-500 mb-1">Z-Score ({timeRange}d)</div>
+            <div className="text-xs sm:text-sm text-gray-500 mb-1">Z-Score {showAllData ? '(All)' : `(${timeRange}d)`}</div>
             <div className="text-base sm:text-lg font-semibold">
               {periodZScore !== null
                 ? periodZScore.toFixed(2)
@@ -565,7 +607,7 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
           </div>
 
           <div className="metric-item" data-metric="percentile-period">
-            <div className="text-xs sm:text-sm text-gray-500 mb-1">Percentile ({timeRange}d)</div>
+            <div className="text-xs sm:text-sm text-gray-500 mb-1">Percentile {showAllData ? '(All)' : `(${timeRange}d)`}</div>
             <div className="text-base sm:text-lg font-semibold">
               {periodPercentile !== null
                 ? `${Math.floor(periodPercentile)}${Math.floor(periodPercentile % 10) === 1 && Math.floor(periodPercentile) !== 11 ? 'st' :
@@ -590,45 +632,72 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       <div className="px-6 py-3 border-b border-light-border bg-white">
         <div className="flex justify-between items-center">
           <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600 mr-2">Time Period:</span>
-            {[1, 7, 14, 30].map(period => {
-              const periodInfo = dataQuality[period];
-              if (!periodInfo?.enabled) return null;
-              
-              return (
-                <button
-                  key={period}
-                  onClick={() => setTimeRange(period)}
-                  className={clsx(
-                    'px-3 py-1 rounded text-sm font-medium transition-colors',
-                    timeRange === period
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  )}
-                >
-                  {period}D
-                  {periodInfo.showWarning && (
-                    <span className="ml-1 text-xs text-yellow-600">⚠</span>
-                  )}
-                </button>
-              );
-            })}
+            {!hasMinimumData ? (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-500">📊 Showing all available data</span>
+                <span className="text-xs text-gray-400">(Period selection available after 7 days of data)</span>
+              </div>
+            ) : (
+              <>
+                <span className="text-sm text-gray-600 mr-2">Time Period:</span>
+                {[1, 7, 14, 30].map(period => {
+                  const periodInfo = dataQuality[period];
+                  if (!periodInfo?.enabled) return null;
+
+                  return (
+                    <button
+                      key={period}
+                      onClick={() => setTimeRange(period)}
+                      className={clsx(
+                        'px-3 py-1 rounded text-sm font-medium transition-colors',
+                        timeRange === period
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      )}
+                    >
+                      {period}D
+                      {periodInfo.showWarning && (
+                        <span className="ml-1 text-xs text-yellow-600">⚠</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
           <div className="flex items-center space-x-4">
+            {periodAverage !== null && (
+              <div className="px-3 py-1 bg-orange-50 border border-orange-200 rounded">
+                <span className="text-xs text-gray-600 mr-2">Period Average:</span>
+                <span className="text-sm font-semibold text-orange-600">
+                  {periodAverage.toFixed(4)}%
+                </span>
+              </div>
+            )}
             <div className="text-xs text-gray-500">
               Last updated: {lastUpdate.toLocaleTimeString('en-US', { timeZone: 'UTC', timeZoneName: 'short' })}
             </div>
-            <LiveFundingTicker asset={baseAsset} selectedContract={symbol} />
           </div>
         </div>
       </div>
       
+      {/* Data quality warning for newly listed contracts */}
+      {!hasMinimumData && historicalData.length > 0 && (
+        <div className="px-6 py-2 bg-blue-50 border-b border-blue-200">
+          <p className="text-sm text-blue-800">
+            ℹ️ This appears to be a newly listed contract. Displaying all available historical data
+            ({historicalData.filter((d: HistoricalDataPoint) => d.funding_rate !== null).length} data points).
+            Period selection will be enabled once 7 days of data is available.
+          </p>
+        </div>
+      )}
+
       {/* Data quality warning for low completeness */}
-      {availablePeriods.length === 1 && dataQuality[7]?.completeness < 20 && (
+      {hasMinimumData && availablePeriods.length === 1 && dataQuality[7]?.completeness < 20 && (
         <div className="px-6 py-2 bg-yellow-50 border-b border-yellow-200">
           <p className="text-sm text-yellow-800">
             ⚠️ Limited historical data available (only {Math.round(dataQuality[7]?.completeness || 0)}% complete).
-            This may be a newly listed contract.
+            Some data points may be missing.
           </p>
         </div>
       )}
@@ -662,17 +731,34 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
                 stroke="#6B7280"
               />
               <Tooltip content={<CustomTooltip />} />
+              <Legend />
               {/* REQUIRED: Zero reference line always visible */}
               <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="3 3" />
               {/* REQUIRED: Area chart with NO interpolation (connectNulls={false}) */}
               <Area
                 type="linear"
                 dataKey="funding_rate"
+                name="Funding Rate"
                 stroke="#10B981"
                 strokeWidth={2}
                 fill="rgba(16, 185, 129, 0.2)"
                 connectNulls={false} // REQUIRED: No interpolation across gaps
               />
+              {/* Period average reference line */}
+              {showPeriodAverage && periodAverage !== null && (
+                <ReferenceLine
+                  y={periodAverage}
+                  stroke="#F97316"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  label={{
+                    value: `Avg: ${periodAverage.toFixed(4)}%`,
+                    position: 'right',
+                    fill: '#F97316',
+                    fontSize: 12
+                  }}
+                />
+              )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -697,6 +783,17 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
         </div>
         
         <div className="flex space-x-2">
+          <button
+            onClick={() => setShowPeriodAverage(!showPeriodAverage)}
+            className={clsx(
+              'px-3 py-1 rounded text-sm font-medium transition-colors border',
+              showPeriodAverage
+                ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600'
+                : 'bg-white text-text-secondary border-light-border hover:bg-gray-100'
+            )}
+          >
+            {showPeriodAverage ? 'Hide' : 'Show'} Period Avg
+          </button>
           <button
             onClick={fetchHistoricalData}
             className="px-3 py-1 bg-white text-text-secondary hover:bg-gray-100 border border-light-border rounded text-sm"

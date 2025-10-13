@@ -22,6 +22,7 @@ from exchanges.binance_exchange import BinanceExchange
 from exchanges.kucoin_exchange import KuCoinExchange
 from exchanges.backpack_exchange import BackpackExchange
 from exchanges.hyperliquid_exchange import HyperliquidExchange
+from exchanges.aster_exchange import AsterExchange
 from database.postgres_manager import PostgresManager
 from utils.backfill_completeness import BackfillCompletenessValidator
 from utils.logger import setup_logger
@@ -34,6 +35,7 @@ EXCHANGE_CLASSES = {
     'kucoin': KuCoinExchange,
     'backpack': BackpackExchange,
     'hyperliquid': HyperliquidExchange,
+    'aster': AsterExchange,
 }
 
 

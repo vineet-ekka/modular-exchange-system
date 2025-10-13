@@ -258,6 +258,9 @@ export interface ContractDetails {
   current_z_score?: number | null;   // Current Z-score
   current_percentile?: number | null;     // Current percentile (0-100)
   current_percentile_apr?: number | null; // Current APR percentile (0-100)
+  sharpe_ratio?: number | null;      // Sharpe ratio (APR / Volatility)
+  asset_volatility_30d?: number | null; // 30-day asset volatility
+  risk_adjusted_apr?: number | null;  // Risk-adjusted APR
 }
 
 export const fetchFundingRatesGrid = async (): Promise<AssetGridResponse | null> => {
@@ -369,3 +372,6 @@ export const fetchContractsByAsset = async (asset: string): Promise<ContractDeta
     return [];
   }
 };
+
+// Export the api instance and API_URL
+export { api, API_URL };

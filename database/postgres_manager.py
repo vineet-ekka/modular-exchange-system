@@ -202,6 +202,14 @@ class PostgresManager:
             self.connection.rollback()
             raise
     
+    def get_connection(self):
+        """
+        Get a new database connection.
+        For compatibility with modules expecting get_connection().
+        """
+        import psycopg2
+        return psycopg2.connect(**self.config)
+
     def test_connection(self) -> bool:
         """
         Test the database connection.
@@ -268,8 +276,8 @@ class PostgresManager:
                     base_asset = EXCLUDED.base_asset
             """
             
-            # Batch insert
-            execute_batch(self.cursor, insert_query, records, page_size=100)
+            # Batch insert with increased page size for better performance
+            execute_batch(self.cursor, insert_query, records, page_size=500)
             self.connection.commit()
             
             self.logger.info(f"Successfully uploaded {len(records)} historical funding rate records")
@@ -358,6 +366,14 @@ class PostgresManager:
             columns_to_keep = [col for col in df_copy.columns if col in valid_columns or historical]
             df_copy = df_copy[columns_to_keep]
 
+            # Handle NaT values in timestamp columns
+            import pandas as pd
+            import numpy as np
+            for col in df_copy.columns:
+                if pd.api.types.is_datetime64_any_dtype(df_copy[col]) or 'time' in col.lower():
+                    # Replace NaT with None (which becomes NULL in PostgreSQL)
+                    df_copy[col] = df_copy[col].replace({pd.NaT: None})
+
             # Convert DataFrame to list of tuples
             columns = df_copy.columns.tolist()
             values = df_copy.values.tolist()
@@ -375,14 +391,54 @@ class PostgresManager:
                     sql.SQL(', ').join(sql.Placeholder() * len(columns))
                 )
                 
-                execute_batch(self.cursor, insert_query, values, page_size=100)
+                execute_batch(self.cursor, insert_query, values, page_size=500)
                 
             else:
+                # For main table, check for funding rate changes before upserting
+                if 'funding_rate' in columns and 'exchange' in columns and 'symbol' in columns:
+                    # Get current rates from database for comparison
+                    fetch_query = """
+                        SELECT exchange, symbol, funding_rate
+                        FROM exchange_data
+                        WHERE (exchange, symbol) IN %s
+                    """
+
+                    # Create list of (exchange, symbol) tuples from values
+                    exchange_idx = columns.index('exchange')
+                    symbol_idx = columns.index('symbol')
+                    funding_rate_idx = columns.index('funding_rate')
+
+                    exchange_symbol_pairs = [(row[exchange_idx], row[symbol_idx]) for row in values]
+
+                    # Fetch existing rates
+                    if exchange_symbol_pairs:
+                        self.cursor.execute(fetch_query, (tuple(set(exchange_symbol_pairs)),))
+                        existing_rates = {(row[0], row[1]): row[2] for row in self.cursor.fetchall()}
+
+                        # Track rate changes
+                        changed_count = 0
+                        unchanged_count = 0
+
+                        for row in values:
+                            exchange = row[exchange_idx]
+                            symbol = row[symbol_idx]
+                            new_rate = row[funding_rate_idx]
+                            old_rate = existing_rates.get((exchange, symbol))
+
+                            if old_rate is not None and abs(float(old_rate) - float(new_rate)) > 0.00000001:
+                                changed_count += 1
+                                self.logger.info(f"Funding rate changed: {exchange} {symbol}: {old_rate:.8f} -> {new_rate:.8f}")
+                            elif old_rate is not None:
+                                unchanged_count += 1
+
+                        if changed_count > 0 or unchanged_count > 0:
+                            self.logger.info(f"Funding rate update summary: {changed_count} changed, {unchanged_count} unchanged")
+
                 # For main table, use UPSERT (INSERT ... ON CONFLICT UPDATE)
                 insert_query = sql.SQL("""
                     INSERT INTO {} ({}) VALUES ({})
-                    ON CONFLICT (exchange, symbol) 
-                    DO UPDATE SET 
+                    ON CONFLICT (exchange, symbol)
+                    DO UPDATE SET
                         funding_rate = EXCLUDED.funding_rate,
                         funding_interval_hours = EXCLUDED.funding_interval_hours,
                         apr = EXCLUDED.apr,
@@ -400,8 +456,8 @@ class PostgresManager:
                     sql.SQL(', ').join(map(sql.Identifier, columns)),
                     sql.SQL(', ').join(sql.Placeholder() * len(columns))
                 )
-                
-                execute_batch(self.cursor, insert_query, values, page_size=100)
+
+                execute_batch(self.cursor, insert_query, values, page_size=500)
             
             self.connection.commit()
             

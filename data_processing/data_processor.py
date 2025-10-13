@@ -70,23 +70,37 @@ class DataProcessor:
         Calculate APR (Annual Percentage Rate) from funding rate and interval.
         Formula: APR = funding_rate * (8760 / funding_interval_hours)
         Where 8760 = hours in a year (365 * 24)
+
+        NOTE: Only calculates APR for rows where it's missing.
+        Some exchanges (like Lighter) provide their own APR calculations.
         """
-        # Calculate APR for rows with valid funding data
+        # Only calculate APR for rows where it's missing
+        # This preserves custom APR calculations from exchanges like Lighter
         mask = (
-            self.data['funding_rate'].notna() & 
-            self.data['funding_interval_hours'].notna() & 
+            self.data['funding_rate'].notna() &
+            self.data['funding_interval_hours'].notna() &
+            (self.data['funding_interval_hours'] > 0) &
+            (self.data['apr'].isna() if 'apr' in self.data.columns else True)
+        )
+
+        # Calculate APR where data is valid and APR is missing
+        # Multiply by 100 to convert to percentage
+        if mask.any():
+            self.data.loc[mask, 'apr'] = (
+                self.data.loc[mask, 'funding_rate'] *
+                (8760 / self.data.loc[mask, 'funding_interval_hours']) * 100
+            )
+
+        # Set APR to None for invalid data (but preserve existing APR values)
+        invalid_mask = ~(
+            self.data['funding_rate'].notna() &
+            self.data['funding_interval_hours'].notna() &
             (self.data['funding_interval_hours'] > 0)
         )
-        
-        # Calculate APR where data is valid
-        # Multiply by 100 to convert to percentage
-        self.data.loc[mask, 'apr'] = (
-            self.data.loc[mask, 'funding_rate'] * 
-            (8760 / self.data.loc[mask, 'funding_interval_hours']) * 100
-        )
-        
-        # Set APR to None for invalid data
-        self.data.loc[~mask, 'apr'] = None
+        if 'apr' in self.data.columns:
+            self.data.loc[invalid_mask & self.data['apr'].isna(), 'apr'] = None
+        else:
+            self.data.loc[invalid_mask, 'apr'] = None
     
     def _format_funding_rate(self, value):
         """

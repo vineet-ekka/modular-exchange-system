@@ -28,6 +28,7 @@ class ArbitrageSpreadStatistics:
         self.cursor = db_connection.cursor()
         self.logger = setup_logger("ArbitrageSpreadStats")
 
+
     def get_spread_statistics(self, asset: str, exchange_a: str, exchange_b: str,
                              current_spread: float) -> Dict:
         """
@@ -181,6 +182,7 @@ class ArbitrageSpreadStatistics:
             """
 
             data = []
+
             for spread in spreads:
                 funding_spread = spread['short_rate'] - spread['long_rate']
                 data.append((
@@ -280,31 +282,33 @@ class ArbitrageSpreadStatistics:
         """
         if long_z is None or short_z is None:
             if spread_z:
-                return min(10, abs(spread_z) * 2)  # Scale spread z-score to 0-10
-            return 0
-
-        # How opposite are the z-scores? (best case for arbitrage)
-        divergence = abs((long_z or 0) - (short_z or 0))
-
-        # How extreme are individual rates?
-        magnitude = (abs(long_z or 0) + abs(short_z or 0)) / 2
-
-        # Are they opposite signs? (ideal for arbitrage)
-        opposite_signs = 1.5 if (long_z * short_z) < 0 else 1.0
-
-        if spread_z is not None:
-            # We have historical spread data
-            score = (
-                abs(spread_z) * 0.5 +      # Historical spread significance
-                divergence * 0.3 +          # How opposite the rates are
-                magnitude * 0.2             # How extreme individual rates are
-            ) * opposite_signs
+                base_score = min(10, abs(spread_z) * 2)
+            else:
+                base_score = 0
         else:
-            # No historical spread data yet
-            score = (
-                divergence * 0.6 +          # More weight on divergence
-                magnitude * 0.4             # Some weight on magnitude
-            ) * opposite_signs
+            # How opposite are the z-scores? (best case for arbitrage)
+            divergence = abs((long_z or 0) - (short_z or 0))
+
+            # How extreme are individual rates?
+            magnitude = (abs(long_z or 0) + abs(short_z or 0)) / 2
+
+            # Are they opposite signs? (ideal for arbitrage)
+            opposite_signs = 1.5 if (long_z * short_z) < 0 else 1.0
+
+            if spread_z is not None:
+                # We have historical spread data
+                base_score = (
+                    abs(spread_z) * 0.5 +      # Historical spread significance
+                    divergence * 0.3 +          # How opposite the rates are
+                    magnitude * 0.2             # How extreme individual rates are
+                ) * opposite_signs
+            else:
+                # No historical spread data yet
+                base_score = (
+                    divergence * 0.6 +          # More weight on divergence
+                    magnitude * 0.4             # Some weight on magnitude
+                ) * opposite_signs
 
         # Scale to 0-10 range
-        return min(10, score * 2)
+        return min(10, base_score * 2)
+

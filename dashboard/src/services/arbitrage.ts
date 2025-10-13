@@ -93,6 +93,26 @@ export interface ContractArbitrageOpportunity {
   rate_spread: number;
   rate_spread_pct: number;
   apr_spread: number | null;
+  // Spread Z-score statistics
+  spread_zscore: number | null;
+  spread_mean: number | null;
+  spread_std_dev: number | null;
+  // New practical metrics
+  long_hourly_rate: number;
+  short_hourly_rate: number;
+  effective_hourly_spread: number;
+  sync_period_hours: number;
+  long_sync_funding: number;
+  short_sync_funding: number;
+  sync_period_spread: number;
+  long_daily_funding: number;
+  short_daily_funding: number;
+  daily_spread: number;
+  // Periodic funding spreads
+  weekly_spread: number;
+  monthly_spread: number;
+  quarterly_spread: number;
+  yearly_spread: number;
   // Combined metrics
   combined_open_interest?: number;
   is_significant: boolean;
@@ -105,12 +125,22 @@ export interface ContractArbitrageResponse {
     average_spread: number;
     max_spread: number;
     max_apr_spread: number;
+    max_daily_spread?: number;
+    max_hourly_spread?: number;
     significant_count: number;
     contracts_analyzed: number;
   };
+  pagination?: {
+    total: number;
+    page: number;
+    page_size: number;
+    total_pages: number;
+  };
   parameters: {
     min_spread: number;
-    top_n: number;
+    page?: number;
+    page_size?: number;
+    top_n?: number;  // Keep for backward compatibility
   };
   timestamp: string;
   version: string;
@@ -118,7 +148,8 @@ export interface ContractArbitrageResponse {
 
 export const fetchContractArbitrageOpportunities = async (
   minSpread = 0.0001,
-  topN = 20
+  page = 1,
+  pageSize = 20
 ): Promise<ContractArbitrageResponse> => {
   try {
     const response = await axios.get<ContractArbitrageResponse>(
@@ -126,7 +157,8 @@ export const fetchContractArbitrageOpportunities = async (
       {
         params: {
           min_spread: minSpread,
-          top_n: topN,
+          page: page,
+          page_size: pageSize,
         },
       }
     );

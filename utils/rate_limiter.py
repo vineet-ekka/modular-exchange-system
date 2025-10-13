@@ -29,6 +29,10 @@ class RateLimiter:
             'binance': 40,      # 2400/min = 40/sec
             'kucoin': 10,       # 100/10s = 10/sec
             'backpack': 10,     # Conservative default
+            'hyperliquid': 10,  # Conservative limit to avoid 429 errors
+            'aster': 20,        # 2400/min = 40/sec, but using conservative 20/sec
+            'drift': 10,        # Conservative default for Solana DEX
+            'bybit': 10,        # Conservative estimate for ByBit
             'deribit': 10,      # Conservative estimate
             'kraken': 15,       # 60/10s public = 6/sec, but we fetch multiple endpoints
             'default': 5        # Default for unknown exchanges

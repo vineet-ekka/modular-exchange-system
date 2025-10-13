@@ -1,19 +1,24 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   fetchContractArbitrageOpportunities,
   ContractArbitrageOpportunity,
   ContractArbitrageResponse
 } from '../services/arbitrage';
-import { ModernCard, ModernButton, ModernSelect, ModernToggle, ModernTable, ModernBadge } from './Modern';
+import { ModernCard, ModernButton, ModernSelect, ModernToggle, ModernTable, ModernBadge, ModernTooltip, ModernPagination } from './Modern';
 import clsx from 'clsx';
 
 const ArbitrageOpportunities: React.FC = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<ContractArbitrageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [minSpread, setMinSpread] = useState(0.0005);
-  const [topN, setTopN] = useState(20);
+  const [pageSize, setPageSize] = useState(20);
+  const [currentPage, setCurrentPage] = useState(1);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [sortKey, setSortKey] = useState<string | undefined>(undefined);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -26,9 +31,12 @@ const ArbitrageOpportunities: React.FC = () => {
 
     try {
       setLoading(true);
-      const response = await fetchContractArbitrageOpportunities(minSpread, topN);
+      const response = await fetchContractArbitrageOpportunities(minSpread, currentPage, pageSize);
 
       if (!abortControllerRef.current.signal.aborted) {
+        console.log('✅ Arbitrage data received:', response);
+        console.log('📊 Statistics available:', response.statistics);
+        console.log('📊 Total opportunities:', response.statistics?.total_opportunities);
         setData(response);
         setError(null);
       }
@@ -40,7 +48,7 @@ const ArbitrageOpportunities: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [minSpread, topN]);
+  }, [minSpread, pageSize, currentPage]);
 
   // Initial fetch and fetch on filter changes
   useEffect(() => {
@@ -51,7 +59,7 @@ const ArbitrageOpportunities: React.FC = () => {
         abortControllerRef.current.abort();
       }
     };
-  }, [minSpread, topN]);
+  }, [minSpread, pageSize, currentPage]);
 
   useEffect(() => {
     if (intervalRef.current) {
@@ -121,6 +129,63 @@ const ArbitrageOpportunities: React.FC = () => {
     );
   };
 
+
+  const handleSort = (key: string, direction: 'asc' | 'desc') => {
+    setSortKey(key);
+    setSortDirection(direction);
+  };
+
+  const handleRowClick = (opportunity: ContractArbitrageOpportunity) => {
+    navigate(
+      `/arbitrage/${opportunity.asset}/${opportunity.long_exchange}/${opportunity.short_exchange}`,
+      { state: { opportunity } }
+    );
+  };
+
+  const sortData = (dataToSort: ContractArbitrageOpportunity[]) => {
+    if (!sortKey) return dataToSort;
+
+    const sorted = [...dataToSort].sort((a, b) => {
+      let aValue: number | null = null;
+      let bValue: number | null = null;
+
+      switch (sortKey) {
+        case 'rateSpread':
+          aValue = a.rate_spread_pct;
+          bValue = b.rate_spread_pct;
+          break;
+        case 'hourly':
+          aValue = a.effective_hourly_spread;
+          bValue = b.effective_hourly_spread;
+          break;
+        case 'sync':
+          aValue = a.sync_period_spread;
+          bValue = b.sync_period_spread;
+          break;
+        case 'daily':
+          aValue = a.daily_spread;
+          bValue = b.daily_spread;
+          break;
+        default:
+          return 0;
+      }
+
+      // Handle null values
+      if (aValue === null || aValue === undefined) return 1;
+      if (bValue === null || bValue === undefined) return -1;
+
+      // Sort based on direction
+      if (sortDirection === 'asc') {
+        return aValue - bValue;
+      } else {
+        return bValue - aValue;
+      }
+    });
+
+    return sorted;
+  };
+
+
   if (loading && !data) {
     return (
       <ModernCard variant="default" padding="xl">
@@ -154,9 +219,10 @@ const ArbitrageOpportunities: React.FC = () => {
       key: 'asset',
       header: 'Asset',
       accessor: (row: ContractArbitrageOpportunity) => (
-        <span className="font-bold text-text-primary">{row.asset}</span>
+        <span className="text-sm font-bold text-text-primary">{row.asset}</span>
       ),
       align: 'left' as const,
+      width: '10%',
     },
     {
       key: 'long',
@@ -164,13 +230,14 @@ const ArbitrageOpportunities: React.FC = () => {
       accessor: (row: ContractArbitrageOpportunity) => (
         <div>
           <div className="font-medium">{row.long_contract}</div>
-          <div className="text-xs text-text-tertiary">{row.long_exchange}</div>
+          <div className="text-sm text-text-tertiary">{row.long_exchange}</div>
           <div className={clsx('text-sm font-mono', row.long_rate < 0 ? 'text-success' : 'text-danger')}>
             {formatPercentage(row.long_rate)}
           </div>
         </div>
       ),
       align: 'left' as const,
+      width: '15%',
     },
     {
       key: 'short',
@@ -178,62 +245,166 @@ const ArbitrageOpportunities: React.FC = () => {
       accessor: (row: ContractArbitrageOpportunity) => (
         <div>
           <div className="font-medium">{row.short_contract}</div>
-          <div className="text-xs text-text-tertiary">{row.short_exchange}</div>
+          <div className="text-sm text-text-tertiary">{row.short_exchange}</div>
           <div className={clsx('text-sm font-mono', row.short_rate > 0 ? 'text-success' : 'text-danger')}>
             {formatPercentage(row.short_rate)}
           </div>
         </div>
       ),
       align: 'left' as const,
+      width: '15%',
     },
     {
-      key: 'spread',
-      header: 'Spread',
+      key: 'rateSpread',
+      header: (
+        <ModernTooltip
+          content="The funding rate difference between long and short positions. APR Spread shows the annualized percentage return from this arbitrage opportunity."
+          position="bottom"
+        >
+          <span>Spread</span>
+        </ModernTooltip>
+      ),
       accessor: (row: ContractArbitrageOpportunity) => (
         <div className="text-center">
-          <div className="text-lg font-bold text-primary">
-            {formatPercentage(row.rate_spread)}
+          <div className="text-sm font-bold text-success">
+            {formatPercentageValue(row.rate_spread_pct)}
           </div>
-          <div className="text-xs text-text-secondary">
+          <div className="text-sm text-text-secondary">
             APR: {formatAPR(row.apr_spread)}
           </div>
         </div>
       ),
       align: 'center' as const,
+      width: '10%',
+      sortable: true,
+    },
+    {
+      key: 'hourly',
+      header: (
+        <ModernTooltip
+          content="Normalized hourly funding rates for comparison. Shows long (L) and short (S) positions' hourly rates, and the effective hourly profit spread when holding both positions."
+          position="bottom"
+        >
+          <span>Effective Hourly</span>
+        </ModernTooltip>
+      ),
+      accessor: (row: ContractArbitrageOpportunity) => (
+        <div>
+          <div className="text-sm text-text-secondary">L: {formatPercentage(row.long_hourly_rate)}/h</div>
+          <div className="text-sm text-text-secondary">S: {formatPercentage(row.short_hourly_rate)}/h</div>
+          <div className="text-sm font-bold text-primary">
+            {formatPercentage(row.effective_hourly_spread)}/h
+          </div>
+        </div>
+      ),
+      align: 'center' as const,
+      width: '12%',
+      sortable: true,
+    },
+    {
+      key: 'sync',
+      header: (
+        <ModernTooltip
+          content="The synchronized period (LCM of funding intervals) when both positions complete full funding cycles together. Shows the cumulative funding spread over this period for accurate profit calculation."
+          position="bottom"
+        >
+          <span>Sync Period</span>
+        </ModernTooltip>
+      ),
+      accessor: (row: ContractArbitrageOpportunity) => (
+        <div>
+          <div className="text-xs text-text-secondary">{row.sync_period_hours}h period</div>
+          <div className="text-xs text-text-tertiary">L: {formatPercentage(row.long_sync_funding)}</div>
+          <div className="text-xs text-text-tertiary">S: {formatPercentage(row.short_sync_funding)}</div>
+          <div className="text-sm font-bold text-warning">
+            Net: {formatPercentage(row.sync_period_spread)}
+          </div>
+        </div>
+      ),
+      align: 'center' as const,
+      width: '10%',
+      sortable: true,
+    },
+    {
+      key: 'daily',
+      header: (
+        <ModernTooltip
+          content="Cumulative funding rates over a 24-hour period. Shows what you'd pay (L) and receive (S) in funding over one day, with the net daily spread at the bottom."
+          position="bottom"
+        >
+          <span>24h Funding</span>
+        </ModernTooltip>
+      ),
+      accessor: (row: ContractArbitrageOpportunity) => (
+        <div>
+          <div className="text-sm text-text-secondary">L: {formatPercentage(row.long_daily_funding)}</div>
+          <div className="text-sm text-text-secondary">S: {formatPercentage(row.short_daily_funding)}</div>
+          <div className="text-sm font-bold text-success">
+            {formatPercentage(row.daily_spread)}
+          </div>
+        </div>
+      ),
+      align: 'center' as const,
+      width: '12%',
+      sortable: true,
     },
     {
       key: 'intervals',
       header: 'Intervals',
       accessor: (row: ContractArbitrageOpportunity) => (
-        <div className="text-center">
-          <div className="text-sm">
-            {row.long_interval_hours}h / {row.short_interval_hours}h
-          </div>
+        <div className="text-sm">
+          {row.long_interval_hours}h / {row.short_interval_hours}h
         </div>
       ),
       align: 'center' as const,
+      width: '8%',
     },
     {
       key: 'zscores',
-      header: 'Z-Scores',
+      header: (
+        <ModernTooltip
+          content="Z-score of the APR spread combination. Calculated as (Current APR Spread - Mean Historical APR Spread) / Standard Deviation. Values >2 or <-2 indicate statistically significant opportunities."
+          position="bottom"
+        >
+          <span>Spread Z-Score</span>
+        </ModernTooltip>
+      ),
       accessor: (row: ContractArbitrageOpportunity) => (
-        <div className="flex gap-1 justify-center">
-          {getZScoreBadge(row.long_zscore)}
-          {getZScoreBadge(row.short_zscore)}
+        <div className="flex flex-col items-center gap-1">
+          {row.spread_zscore !== null && row.spread_zscore !== undefined ? (
+            <>
+              {getZScoreBadge(row.spread_zscore)}
+              {row.spread_mean !== null && row.spread_std_dev !== null && (
+                <div className="text-xs text-text-tertiary">
+                  μ={row.spread_mean.toFixed(1)}% σ={row.spread_std_dev.toFixed(1)}%
+                </div>
+              )}
+            </>
+          ) : (
+            <span className="text-text-tertiary text-xs">No data</span>
+          )}
         </div>
       ),
       align: 'center' as const,
+      width: '12%',
     },
     {
       key: 'openInterest',
       header: 'Open Interest',
       accessor: (row: ContractArbitrageOpportunity) => (
-        <div className="text-right">
-          <div className="text-sm">{formatOpenInterest(row.long_open_interest)}</div>
-          <div className="text-sm">{formatOpenInterest(row.short_open_interest)}</div>
+        <div>
+          <div className="text-sm">
+            <span className="text-text-tertiary">L:</span>
+            <span className="ml-1">{formatOpenInterest(row.long_open_interest)}</span>
+          </div>
+          <div className="text-sm">
+            <span className="text-text-tertiary">S:</span>
+            <span className="ml-1">{formatOpenInterest(row.short_open_interest)}</span>
+          </div>
         </div>
       ),
       align: 'right' as const,
+      width: '11%',
     },
   ];
 
@@ -245,7 +416,10 @@ const ArbitrageOpportunities: React.FC = () => {
           <ModernSelect
             label="Minimum Spread"
             value={minSpread}
-            onChange={(value) => setMinSpread(Number(value))}
+            onChange={(value) => {
+              setMinSpread(Number(value));
+              setCurrentPage(1);  // Reset to first page when filter changes
+            }}
             options={[
               { value: 0.0001, label: '0.01%' },
               { value: 0.0005, label: '0.05%' },
@@ -256,14 +430,16 @@ const ArbitrageOpportunities: React.FC = () => {
           />
 
           <ModernSelect
-            label="Top Results"
-            value={topN}
-            onChange={(value) => setTopN(Number(value))}
+            label="Page Size"
+            value={pageSize}
+            onChange={(value) => {
+              setPageSize(Number(value));
+              setCurrentPage(1);  // Reset to first page when page size changes
+            }}
             options={[
               { value: 10, label: '10' },
               { value: 20, label: '20' },
               { value: 50, label: '50' },
-              { value: 100, label: '100' },
             ]}
           />
 
@@ -298,7 +474,7 @@ const ArbitrageOpportunities: React.FC = () => {
               Total Opportunities
             </div>
             <div className="text-2xl font-bold text-text-primary">
-              {data.statistics.total_opportunities}
+              {data?.statistics?.total_opportunities || 0}
             </div>
           </ModernCard>
 
@@ -307,16 +483,16 @@ const ArbitrageOpportunities: React.FC = () => {
               Max Spread
             </div>
             <div className="text-2xl font-bold text-success">
-              {formatPercentageValue(data.statistics.max_spread)}
+              {formatPercentageValue(data?.statistics?.max_spread || 0)}
             </div>
           </ModernCard>
 
           <ModernCard variant="flat" padding="md">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
-              Max APR Spread
+              Max Daily Spread
             </div>
             <div className="text-2xl font-bold text-warning">
-              {formatAPR(data.statistics.max_apr_spread)}
+              {formatPercentageValue(data?.statistics?.max_daily_spread || 0)}
             </div>
           </ModernCard>
 
@@ -325,7 +501,7 @@ const ArbitrageOpportunities: React.FC = () => {
               Significant (|Z| &gt; 2)
             </div>
             <div className="text-2xl font-bold text-primary">
-              {data.statistics.significant_count || 0}
+              {data?.statistics?.significant_count || 0}
             </div>
           </ModernCard>
 
@@ -334,23 +510,51 @@ const ArbitrageOpportunities: React.FC = () => {
               Contracts Analyzed
             </div>
             <div className="text-2xl font-bold text-text-primary">
-              {data.statistics.contracts_analyzed || 0}
+              {data?.statistics?.contracts_analyzed || 0}
             </div>
           </ModernCard>
         </div>
       )}
 
       {/* Data Table */}
-      <ModernCard padding="none">
+      <ModernCard padding="none" className="relative">
+        {/* Loading overlay for smooth page transitions */}
+        {loading && data && (
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center z-20 rounded-lg">
+            <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-lg shadow-lg">
+              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-sm text-text-secondary font-medium">
+                Loading page {currentPage}...
+              </span>
+            </div>
+          </div>
+        )}
         <ModernTable
           columns={columns}
-          data={data?.opportunities || []}
+          data={sortData(data?.opportunities || [])}
           striped
           hover
           stickyHeader
           emptyMessage="No arbitrage opportunities found with current filters"
+          onSort={handleSort}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onRowClick={handleRowClick}
         />
       </ModernCard>
+
+      {/* Pagination */}
+      {data?.pagination && data.pagination.total_pages > 1 && (
+        <ModernCard padding="lg">
+          <ModernPagination
+            currentPage={currentPage}
+            totalPages={data.pagination.total_pages}
+            pageSize={pageSize}
+            totalItems={data.pagination.total}
+            onPageChange={setCurrentPage}
+          />
+        </ModernCard>
+      )}
 
       {/* Last Update */}
       {data && (

@@ -11,6 +11,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2 import pool
 import pandas as pd
+import numpy as np
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta, timezone
 import json
@@ -34,6 +35,7 @@ load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Exchange Data API",
@@ -197,6 +199,25 @@ def return_db_connection(conn):
     if connection_pool and conn:
         connection_pool.putconn(conn)
 
+def sanitize_numeric_value(value):
+    """Sanitize numeric values for JSON serialization."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if math.isnan(value) or math.isinf(value):
+            return None
+    return value
+
+def sanitize_response_data(data):
+    """Recursively sanitize all numeric values in response data to remove NaN/Infinity."""
+    if isinstance(data, dict):
+        return {k: sanitize_response_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_response_data(item) for item in data]
+    elif isinstance(data, (int, float)):
+        return sanitize_numeric_value(data)
+    return data
+
 @app.get("/")
 async def root():
     """API root endpoint with status information."""
@@ -288,8 +309,8 @@ async def performance_health():
             },
             "performance_metrics": perf_metrics,
             "cache_stats": {
-                "entries": len(api_cache.cache),
-                "oldest_entry": min(api_cache.timestamps.values()) if api_cache.timestamps else None
+                "entries": len(api_cache.fallback_cache.cache),
+                "oldest_entry": datetime.fromtimestamp(min(api_cache.fallback_cache.timestamps.values()), tz=timezone.utc).isoformat() if api_cache.fallback_cache.timestamps else None
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -320,7 +341,7 @@ async def get_funding_rates(
     from config.settings import API_MAX_DATA_AGE_DAYS
 
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
         # Build query with filters, include 30-day statistics from funding_statistics
@@ -396,7 +417,9 @@ async def get_funding_rates(
                        'mean_30d', 'std_dev_30d', 'mean_30d_apr', 'std_dev_30d_apr', 'current_z_score',
                        'current_percentile', 'current_percentile_apr']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             # Convert datetime to ISO string
             if item.get('last_updated'):
                 item['last_updated'] = item['last_updated'].isoformat()
@@ -414,46 +437,63 @@ async def get_funding_rates(
 async def get_statistics():
     """
     Get dashboard statistics including totals, averages, and extremes.
+    Filters out inactive and stale contracts for consistency with other endpoints.
     """
+    from config.settings import API_MAX_DATA_AGE_DAYS
+
     conn = get_db_connection()
     cur = conn.cursor()
     
     try:
-        # Get overall statistics
+        # Get overall statistics (filtered for active contracts only)
         cur.execute("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_contracts,
                 AVG(apr) as avg_apr,
                 MAX(apr) as highest_apr,
                 MIN(apr) as lowest_apr,
-                COUNT(DISTINCT exchange) as active_exchanges,
-                COUNT(DISTINCT base_asset) as unique_assets,
-                SUM(open_interest) as total_open_interest
-            FROM exchange_data
-            WHERE apr IS NOT NULL
-        """)
+                COUNT(DISTINCT ed.exchange) as active_exchanges,
+                COUNT(DISTINCT ed.base_asset) as unique_assets,
+                SUM(CASE WHEN ed.open_interest = 'NaN'::numeric THEN 0 ELSE ed.open_interest END) as total_open_interest
+            FROM exchange_data ed
+            LEFT JOIN contract_metadata cm
+                ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+            WHERE ed.apr IS NOT NULL
+                AND (cm.is_active = true OR cm.is_active IS NULL)
+                AND ed.last_updated > NOW() - INTERVAL '%s days'
+        """, [API_MAX_DATA_AGE_DAYS])
         
         stats = dict(cur.fetchone())
         
-        # Get highest APR contract details
+        # Get highest APR contract details (filtered for active contracts only)
         cur.execute("""
-            SELECT symbol, exchange, apr
-            FROM exchange_data
-            WHERE apr = (SELECT MAX(apr) FROM exchange_data WHERE apr IS NOT NULL)
+            SELECT ed.symbol, ed.exchange, ed.apr
+            FROM exchange_data ed
+            LEFT JOIN contract_metadata cm
+                ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+            WHERE ed.apr IS NOT NULL
+                AND (cm.is_active = true OR cm.is_active IS NULL)
+                AND ed.last_updated > NOW() - INTERVAL '%s days'
+            ORDER BY ed.apr DESC
             LIMIT 1
-        """)
+        """, [API_MAX_DATA_AGE_DAYS])
         highest = cur.fetchone()
         if highest:
             stats['highest_symbol'] = highest['symbol']
             stats['highest_exchange'] = highest['exchange']
-        
-        # Get lowest APR contract details
+
+        # Get lowest APR contract details (filtered for active contracts only)
         cur.execute("""
-            SELECT symbol, exchange, apr
-            FROM exchange_data
-            WHERE apr = (SELECT MIN(apr) FROM exchange_data WHERE apr IS NOT NULL)
+            SELECT ed.symbol, ed.exchange, ed.apr
+            FROM exchange_data ed
+            LEFT JOIN contract_metadata cm
+                ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+            WHERE ed.apr IS NOT NULL
+                AND (cm.is_active = true OR cm.is_active IS NULL)
+                AND ed.last_updated > NOW() - INTERVAL '%s days'
+            ORDER BY ed.apr ASC
             LIMIT 1
-        """)
+        """, [API_MAX_DATA_AGE_DAYS])
         lowest = cur.fetchone()
         if lowest:
             stats['lowest_symbol'] = lowest['symbol']
@@ -521,7 +561,9 @@ async def get_top_apr(limit: int = 20):
             item = dict(row)
             for key in ['funding_rate', 'apr', 'mark_price', 'open_interest']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             data.append(item)
         
         return data
@@ -566,7 +608,9 @@ async def group_by_asset():
             item['exchange_count'] = int(item['exchange_count'])
             for key in ['avg_apr', 'max_apr', 'min_apr', 'total_open_interest']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             data.append(item)
         
         return data
@@ -624,7 +668,9 @@ async def get_historical(
             item = dict(row)
             for key in ['funding_rate', 'apr', 'mark_price']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             if item.get('timestamp'):
                 item['timestamp'] = item['timestamp'].isoformat()
             data.append(item)
@@ -748,7 +794,9 @@ async def get_historical_funding(
             item = dict(row)
             for key in ['funding_rate', 'mark_price']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             if item.get('funding_time'):
                 item['funding_time'] = item['funding_time'].isoformat()
             data.append(item)
@@ -843,19 +891,23 @@ async def get_funding_rates_grid():
     """
     Get funding rates grouped by asset across all exchanges.
     Returns a simplified grid view with one row per asset.
+
+    For exchanges with multiple contracts per asset (e.g., Binance BTC),
+    displays the contract with the most extreme (highest absolute) funding rate,
+    filtered to contracts updated within the last 60 seconds.
+    This prioritizes actionable arbitrage opportunities over recency alone.
     """
     from config.settings import API_MAX_DATA_AGE_DAYS
 
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     try:
-        # Query to get latest funding rate per asset across all exchanges
-        # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
-        # Also get z-scores from funding_statistics table
-        # Query to get latest funding rate per asset across all exchanges
-        # For Hyperliquid, symbol = base_asset (both are same, e.g., "BTC")
-        # Also get z-scores from funding_statistics table
+        # Query strategy for multi-contract assets:
+        # - Filter: Only contracts updated in last 60 seconds (aligns with 30s collection cycle)
+        # - Selection: Choose contract with highest |funding_rate| per (asset, exchange)
+        # - Rationale: Surfaces extreme rates for arbitrage detection
+        # - Fallback: If rates equal, prioritize most recently updated
         cur.execute("""
             WITH latest_rates AS (
                 SELECT DISTINCT ON (COALESCE(ed.base_asset, ed.symbol), ed.exchange)
@@ -880,7 +932,11 @@ async def get_funding_rates_grid():
                     -- Filter out inactive contracts and stale data
                     AND (cm.is_active = true OR cm.is_active IS NULL)
                     AND ed.last_updated > NOW() - INTERVAL %s
-                ORDER BY COALESCE(ed.base_asset, ed.symbol), ed.exchange, ed.last_updated DESC
+                    -- 60-second recency filter for extreme rate selection
+                    AND ed.last_updated > NOW() - INTERVAL '60 seconds'
+                ORDER BY COALESCE(ed.base_asset, ed.symbol), ed.exchange,
+                         ABS(ed.funding_rate) DESC NULLS LAST,
+                         ed.last_updated DESC
             )
             SELECT
                 base_asset,
@@ -915,13 +971,13 @@ async def get_funding_rates_grid():
             if row['exchange_rates']:
                 for exchange, rates in row['exchange_rates'].items():
                     asset_data['exchanges'][exchange] = {
-                        'funding_rate': float(rates['funding_rate']) if rates['funding_rate'] else None,
-                        'apr': float(rates['apr']) if rates['apr'] else None,
+                        'funding_rate': sanitize_numeric_value(float(rates['funding_rate'])) if rates['funding_rate'] else None,
+                        'apr': sanitize_numeric_value(float(rates['apr'])) if rates['apr'] else None,
                         'funding_interval_hours': int(rates['funding_interval_hours']) if rates.get('funding_interval_hours') else None,
-                        'z_score': float(rates['z_score']) if rates.get('z_score') else None,
-                        'percentile': float(rates['percentile']) if rates.get('percentile') else None,
-                        'mean_30d': float(rates['mean_30d']) if rates.get('mean_30d') else None,
-                        'std_dev_30d': float(rates['std_dev_30d']) if rates.get('std_dev_30d') else None
+                        'z_score': sanitize_numeric_value(float(rates['z_score'])) if rates.get('z_score') else None,
+                        'percentile': sanitize_numeric_value(float(rates['percentile'])) if rates.get('percentile') else None,
+                        'mean_30d': sanitize_numeric_value(float(rates['mean_30d'])) if rates.get('mean_30d') else None,
+                        'std_dev_30d': sanitize_numeric_value(float(rates['std_dev_30d'])) if rates.get('std_dev_30d') else None
                     }
             
             grid_data.append(asset_data)
@@ -963,6 +1019,7 @@ async def get_arbitrage_opportunities(
             min_spread=min_spread
         )
 
+
         return {
             'opportunities': result['opportunities'],
             'statistics': result['statistics'],
@@ -979,41 +1036,165 @@ async def get_arbitrage_opportunities(
 @app.get("/api/arbitrage/opportunities-v2")
 async def get_contract_level_arbitrage_opportunities(
     min_spread: float = Query(0.001, description="Minimum spread to consider (0.001 = 0.1%)"),
-    top_n: int = Query(20, ge=1, le=100, description="Number of top opportunities to return")
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    page_size: int = Query(20, ge=1, le=50, description="Number of results per page")
 ):
     """
     Get contract-specific arbitrage opportunities with correct Z-scores.
     This endpoint returns the exact contracts to trade, not just assets and exchanges.
     Each contract's Z-score corresponds to that specific contract.
 
+    Supports pagination to handle large result sets efficiently.
+
     Returns:
         - Specific contract symbols (e.g., BTCUSDT, XBTUSDTM)
         - Correct Z-scores for each individual contract
         - Exact trading pairs to execute
+        - Pagination metadata for navigation
     """
     try:
+        # Check Redis cache first for faster response
+        cache_key = f"arbitrage:v2:{page}:{page_size}:{min_spread}"
+
+        # Try to get from cache
+        cached_result = api_cache.get(cache_key)
+        if cached_result:
+            logger.info(f"Cache hit for arbitrage page {page}")
+            return cached_result
+
         # Import the new contract-level scanner
         from utils.arbitrage_scanner import calculate_contract_level_arbitrage
 
-        # Find contract-level opportunities
+        # Find contract-level opportunities with pagination
         result = calculate_contract_level_arbitrage(
             min_spread=min_spread,
-            top_n=top_n
+            page=page,
+            page_size=page_size
         )
 
-        return {
+        # Sanitize the result to remove NaN/Infinity values
+        sanitized_result = sanitize_response_data({
             'opportunities': result['opportunities'],
             'statistics': result['statistics'],
+            'pagination': result.get('pagination', {
+                'total': result.get('statistics', {}).get('total_opportunities', 0),
+                'page': page,
+                'page_size': page_size,
+                'total_pages': 1
+            }),
             'parameters': {
                 'min_spread': min_spread,
-                'top_n': top_n
+                'page': page,
+                'page_size': page_size
             },
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'version': 'v2-contract-level'
-        }
+            'version': 'v2-contract-level-paginated'
+        })
+
+        # Cache the result - reduced to 30s to match data update cycle
+        api_cache.set(cache_key, sanitized_result, ttl_seconds=30)  # Cache for 30 seconds
+        logger.info(f"Cached arbitrage page {page}")
+
+        return sanitized_result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/arbitrage/opportunity-detail/{asset}/{long_exchange}/{short_exchange}")
+async def get_arbitrage_opportunity_detail(
+    asset: str,
+    long_exchange: str,
+    short_exchange: str
+):
+    """
+    Get detailed information for a specific arbitrage opportunity.
+    Includes historical data and extended statistics for the specific pair.
+    """
+    try:
+        # Import the scanner to get current opportunity
+        from utils.arbitrage_scanner import calculate_contract_level_arbitrage
+
+        # Get all opportunities and find the specific one
+        result = calculate_contract_level_arbitrage(min_spread=0, page=1, page_size=1000)
+
+        # Find the specific opportunity
+        opportunity = None
+        for opp in result['opportunities']:
+            if (opp['asset'].upper() == asset.upper() and
+                opp['long_exchange'].lower() == long_exchange.lower() and
+                opp['short_exchange'].lower() == short_exchange.lower()):
+                opportunity = opp
+                break
+
+        if not opportunity:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+
+        # Get historical data for this specific pair from the database
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        try:
+            # Get 30-day historical spread data
+            query = """
+                SELECT
+                    DATE_TRUNC('day', timestamp) as date,
+                    AVG(apr_spread) as avg_apr_spread,
+                    MAX(apr_spread) as max_apr_spread,
+                    MIN(apr_spread) as min_apr_spread,
+                    COUNT(*) as data_points
+                FROM arbitrage_spreads
+                WHERE asset = %s
+                    AND ((exchange_a = %s AND exchange_b = %s) OR
+                         (exchange_a = %s AND exchange_b = %s))
+                    AND timestamp >= NOW() - INTERVAL '30 days'
+                GROUP BY DATE_TRUNC('day', timestamp)
+                ORDER BY date DESC
+            """
+
+            cur.execute(query, (
+                asset,
+                long_exchange, short_exchange,
+                short_exchange, long_exchange
+            ))
+            historical_data = cur.fetchall()
+
+            # Calculate additional statistics
+            if historical_data:
+                all_spreads = [row['avg_apr_spread'] for row in historical_data if row['avg_apr_spread']]
+                if all_spreads:
+                    avg_30d = sum(all_spreads) / len(all_spreads)
+                    max_30d = max(all_spreads)
+                    min_30d = min(all_spreads)
+                else:
+                    avg_30d = max_30d = min_30d = None
+            else:
+                avg_30d = max_30d = min_30d = None
+
+            # Return enriched opportunity data
+            return {
+                'opportunity': opportunity,
+                'historical': {
+                    'daily_data': historical_data,
+                    'statistics': {
+                        'avg_30d_spread': avg_30d,
+                        'max_30d_spread': max_30d,
+                        'min_30d_spread': min_30d,
+                        'data_days': len(historical_data)
+                    }
+                },
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+
+        finally:
+            cur.close()
+            conn.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/historical-funding-by-asset/{asset}")
 async def get_historical_funding_by_asset(
@@ -1258,7 +1439,7 @@ async def get_historical_funding_by_contract(
                 'open_interest': float(row['open_interest']) if row.get('open_interest') is not None else None
             })
         
-        return {
+        return sanitize_response_data({
             'exchange': exchange,
             'symbol': symbol,
             'base_asset': base_asset,
@@ -1266,7 +1447,7 @@ async def get_historical_funding_by_contract(
             'days': days,
             'data_points': len(chart_data),
             'data': chart_data
-        }
+        })
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1481,7 +1662,9 @@ async def test_connection():
             item = dict(row)
             for key in ['funding_rate', 'apr', 'index_price', 'mark_price', 'open_interest']:
                 if item.get(key) is not None:
-                    item[key] = float(item[key])
+                    value = float(item[key])
+                    # Convert NaN/Inf to None for JSON compatibility
+                    item[key] = None if (math.isnan(value) or math.isinf(value)) else value
             if item.get('last_updated'):
                 item['last_updated'] = item['last_updated'].isoformat()
             sample_data.append(item)
@@ -1755,8 +1938,8 @@ async def get_contracts_with_zscores(
     # Generate cache key from parameters
     cache_key = CacheKeys.contracts_with_zscores(exchanges, search, min_abs_zscore, sort)
 
-    # Check cache first
-    cached_result = api_cache.get(cache_key, ttl_seconds=5)
+    # Check cache first - standardized to 25s
+    cached_result = api_cache.get(cache_key, ttl_seconds=25)
     if cached_result is not None:
         return cached_result
     
@@ -1764,12 +1947,13 @@ async def get_contracts_with_zscores(
     cur = conn.cursor()
     
     try:
-        # Build the query with filters - NO JOIN, use funding_interval_hours from funding_statistics
+        # Build the query with filters - JOIN with exchange_data to get mark_price
         base_query = """
-            SELECT 
+            SELECT
                 fs.symbol as contract,
                 fs.exchange,
                 fs.base_asset,
+                ed.mark_price,
                 fs.current_z_score as z_score,
                 fs.current_z_score_apr as z_score_apr,
                 fs.current_funding_rate as funding_rate,
@@ -1787,6 +1971,9 @@ async def get_contracts_with_zscores(
                 COALESCE(fs.funding_interval_hours, 8) as funding_interval_hours,
                 fs.last_updated
             FROM funding_statistics fs
+            LEFT JOIN exchange_data ed
+                ON fs.exchange = ed.exchange
+                AND fs.symbol = ed.symbol
             WHERE 1=1
         """
         
@@ -1852,19 +2039,20 @@ async def get_contracts_with_zscores(
                 'contract': row['contract'],
                 'exchange': row['exchange'],
                 'base_asset': row['base_asset'],
-                'z_score': float(row['z_score']) if row['z_score'] else None,
-                'z_score_apr': float(row['z_score_apr']) if row['z_score_apr'] else None,
-                'funding_rate': float(row['funding_rate']) if row['funding_rate'] else None,
-                'apr': float(row['apr']) if row['apr'] else None,
+                'mark_price': sanitize_numeric_value(float(row['mark_price'])) if row['mark_price'] else None,
+                'z_score': sanitize_numeric_value(float(row['z_score'])) if row['z_score'] else None,
+                'z_score_apr': sanitize_numeric_value(float(row['z_score_apr'])) if row['z_score_apr'] else None,
+                'funding_rate': sanitize_numeric_value(float(row['funding_rate'])) if row['funding_rate'] else None,
+                'apr': sanitize_numeric_value(float(row['apr'])) if row['apr'] else None,
                 'percentile': row['percentile'],
                 'percentile_apr': row['percentile_apr'],
-                'mean_30d': float(row['mean_30d']) if row['mean_30d'] else None,
-                'std_dev_30d': float(row['std_dev_30d']) if row['std_dev_30d'] else None,
-                'mean_30d_apr': float(row['mean_30d_apr']) if row['mean_30d_apr'] else None,
-                'std_dev_30d_apr': float(row['std_dev_30d_apr']) if row['std_dev_30d_apr'] else None,
+                'mean_30d': sanitize_numeric_value(float(row['mean_30d'])) if row['mean_30d'] else None,
+                'std_dev_30d': sanitize_numeric_value(float(row['std_dev_30d'])) if row['std_dev_30d'] else None,
+                'mean_30d_apr': sanitize_numeric_value(float(row['mean_30d_apr'])) if row['mean_30d_apr'] else None,
+                'std_dev_30d_apr': sanitize_numeric_value(float(row['std_dev_30d_apr'])) if row['std_dev_30d_apr'] else None,
                 'data_points': row['data_points'],
                 'expected_points': row['expected_points'],
-                'completeness_percentage': float(row['completeness_percentage']) if row['completeness_percentage'] else None,
+                'completeness_percentage': sanitize_numeric_value(float(row['completeness_percentage'])) if row['completeness_percentage'] else None,
                 'confidence': row['confidence'],
                 'funding_interval_hours': row['funding_interval_hours'],
                 'next_funding_seconds': next_funding_seconds
@@ -1878,8 +2066,8 @@ async def get_contracts_with_zscores(
             'update_timestamp': datetime.now(timezone.utc).isoformat()
         }
         
-        # Cache the result with TTL
-        api_cache.set(cache_key, result, ttl_seconds=5)
+        # Cache the result with TTL - standardized to 25s
+        api_cache.set(cache_key, result, ttl_seconds=25)
         
         return result
         
@@ -1927,10 +2115,10 @@ async def get_extreme_values(
                 'contract': row['contract'],
                 'exchange': row['exchange'],
                 'base_asset': row['base_asset'],
-                'z_score': float(row['z_score']) if row['z_score'] else None,
-                'z_score_apr': float(row['z_score_apr']) if row['z_score_apr'] else None,
-                'funding_rate': float(row['funding_rate']) if row['funding_rate'] else None,
-                'apr': float(row['apr']) if row['apr'] else None,
+                'z_score': sanitize_numeric_value(float(row['z_score'])) if row['z_score'] else None,
+                'z_score_apr': sanitize_numeric_value(float(row['z_score_apr'])) if row['z_score_apr'] else None,
+                'funding_rate': sanitize_numeric_value(float(row['funding_rate'])) if row['funding_rate'] else None,
+                'apr': sanitize_numeric_value(float(row['apr'])) if row['apr'] else None,
                 'percentile': row['percentile'],
                 'percentile_apr': row['percentile_apr'],
                 'confidence': row['confidence']
@@ -1957,7 +2145,7 @@ async def get_statistics_summary():
     """
     # Check cache first
     cache_key = "statistics_summary"
-    cached_result = api_cache.get(cache_key, ttl_seconds=10)
+    cached_result = api_cache.get(cache_key, ttl_seconds=25)  # Standardized to 25s
     if cached_result is not None:
         return cached_result
     
@@ -2064,8 +2252,8 @@ async def get_statistics_summary():
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
-        # Cache the result with TTL
-        api_cache.set(cache_key, result, ttl_seconds=10)
+        # Cache the result with TTL - standardized to 25s
+        api_cache.set(cache_key, result, ttl_seconds=25)
         
         return result
         
@@ -2233,6 +2421,10 @@ async def retry_incomplete_backfill(
         raise HTTPException(status_code=500, detail=str(e))
 
 # WebSocket endpoints removed
+
+    finally:
+        cur.close()
+        conn.close()
 
 if __name__ == "__main__":
     import uvicorn

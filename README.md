@@ -1,6 +1,6 @@
 # Multi-Exchange Cryptocurrency Funding Rate Dashboard (MVP)
 
-An MVP cryptocurrency funding rate tracking system supporting 6 exchanges with real-time updates, historical data analysis, and cross-exchange arbitrage detection.
+An MVP cryptocurrency funding rate tracking system supporting 8 exchanges with real-time updates, historical data analysis, and cross-exchange arbitrage detection.
 
 **Note: This is a minimum viable product (MVP) for demonstration and development purposes only. Not intended for production use.**
 
@@ -53,9 +53,9 @@ This automatically:
 ## System Overview
 
 ### Core Capabilities
-- **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, Backpack, Hyperliquid, Aster, and Drift
+- **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, ByBit, Hyperliquid, Aster, Lighter, Backpack, and Drift
 - **Sequential Collection**: Staggered API calls to manage rate limits (0s, 30s, 120s, 180s delays)
-- **Asset Aggregation**: 600+ unique assets consolidated from 1,403 individual contracts
+- **Asset Aggregation**: 656 unique assets consolidated from 2,275 individual contracts
 - **Historical Analysis**: 30-day rolling window with automated backfill and gap detection
 - **Dashboard**: React-based interface with real-time updates and charts
 - **APR Calculations**: Automatic annualized percentage rate computation
@@ -63,9 +63,9 @@ This automatically:
 - **Redis Caching**: High-performance caching with 5s TTL for contracts, 10s for summaries
 
 ### System Statistics
-- **Total Contracts**: 1,403 perpetual futures
-- **Active Exchanges**: 6 (Binance, KuCoin, Backpack, Hyperliquid, Aster, Drift)
-- **Unique Assets**: 600+ with cross-exchange comparison
+- **Total Contracts**: 2,275 perpetual futures
+- **Active Exchanges**: 8 (Binance, KuCoin, ByBit, Hyperliquid, Aster, Lighter, Backpack, Drift)
+- **Unique Assets**: 656 with cross-exchange comparison
 - **Update Frequency**: 30-second real-time refresh
 - **Historical Coverage**: 30-day rolling window
 - **API Endpoints**: 25+ RESTful endpoints
@@ -78,8 +78,8 @@ This automatically:
 ```
 ┌─────────────────────────────────────────────┐
 │          Exchange APIs                      │
-│  (Binance, KuCoin, Backpack, Hyperliquid,  │
-│         Aster, Drift)                       │
+│  (Binance, KuCoin, ByBit, Hyperliquid,     │
+│   Aster, Lighter, Backpack, Drift)         │
 └─────────────┬───────────────────────────────┘
               │
               ▼
@@ -164,7 +164,7 @@ This automatically:
 - Automated backfill scripts
 
 ### Dashboard Features
-- Asset-based grid view (556 assets)
+- Asset-based grid view (656 assets)
 - Expandable rows showing individual contracts
 - **Funding Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
 - **Enhanced Search**: Search both assets AND contracts simultaneously
@@ -196,45 +196,56 @@ This automatically:
 
 ### Active Exchanges
 
-#### Binance (547 contracts)
+#### Binance (589 contracts)
 | Market Type | Contracts | Funding Intervals | Features |
 |------------|-----------|-------------------|----------|
-| USD-M | 511 | 4h (61.6%), 8h (38%), 1h (0.4%) | USDT-margined perpetuals |
+| USD-M | 553 | 4h (64.3%), 8h (34.6%), 1h (1.0%) | USDT-margined perpetuals |
 | COIN-M | 36 | 8 hours | Coin-margined perpetuals |
 
-#### KuCoin (477 contracts)
+#### KuCoin (519 contracts)
 | Funding Interval | Contracts | Percentage | Notable Examples |
 |-----------------|-----------|------------|------------------|
-| 4 hours | 283 | 59.5% | Higher frequency |
-| 8 hours | 188 | 39.4% | Standard perpetuals |
-| 1 hour | 4 | 0.8% | CARVUSDTM, XEMUSDTM |
-| 2 hours | 1 | 0.2% | MAGICUSDTM |
+| 4 hours | 324 | 62.8% | Higher frequency |
+| 8 hours | 178 | 34.5% | Standard perpetuals |
+| 1 hour | 14 | 2.7% | CARVUSDTM, XEMUSDTM |
+| 2 hours | 3 | 0.6% | MAGICUSDTM |
 
-#### Backpack (43 contracts)
+#### ByBit (663 contracts)
+| Market Type | Contracts | Funding Intervals | Features |
+|------------|-----------|-------------------|----------|
+| Linear | 639 | 4h (52.3%), 8h (38.8%), 1h (5.9%), 2h (3.0%) | USDT/USDC-margined |
+| Inverse | 24 | 8h (100%) | USD-margined perpetuals |
+
+#### Backpack (63 contracts)
 | Funding Interval | Contracts | Percentage | Features |
 |-----------------|-----------|------------|----------|
-| 1 hour | 43 | 100% | All contracts now 1-hour funding |
+| 1 hour | 63 | 100% | All contracts now 1-hour funding |
 
-#### Hyperliquid (173 contracts)
+#### Hyperliquid (182 contracts)
 | Funding Interval | Contracts | Percentage | Features |
 |-----------------|-----------|------------|----------|
-| 1 hour | 173 | 100% | Unique DEX with hourly funding |
+| 1 hour | 182 | 100% | Unique DEX with hourly funding |
 
-#### Aster (102 contracts)
+#### Aster (120 contracts)
 | Funding Interval | Contracts | Rate Limit | Features |
 |-----------------|-----------|------------|----------|
-| 4 hours | 102 | 40 req/s | DEX with async/parallel fetching, USDT pairs |
+| 4 hours | 120 | 40 req/s | DEX with async/parallel fetching, USDT pairs |
 
-#### Drift (61 contracts)
+#### Lighter (91 contracts)
 | Funding Interval | Contracts | Platform | Features |
 |-----------------|-----------|----------|----------|
-| 1 hour | 61 | Solana | Solana-based DEX, excludes betting markets |
+| 8 hours | 91 | DEX Aggregator | CEX-standard equivalent, aggregates from Binance/OKX/ByBit |
+
+#### Drift (48 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 1 hour | 48 | Solana | Solana-based DEX, excludes betting markets |
 
 ### Ready for Integration
 - **Kraken**: 353 contracts (module available)
 - **Deribit**: 20 contracts (module available)
 
-**Total Active**: 1,403 perpetual contracts across 600+ unique assets
+**Total Active**: 2,275 perpetual contracts across 656 unique assets
 
 ## Installation & Setup
 
@@ -299,12 +310,14 @@ python main.py --loop --interval 30 --quiet
 ```python
 # Exchange Configuration
 EXCHANGES = {
-    'binance': True,      # 547 contracts
-    'kucoin': True,       # 477 contracts
-    'backpack': True,     # 43 contracts
-    'hyperliquid': True,  # 173 contracts (1-hour funding)
-    'aster': True,        # 102 contracts (4-hour funding)
-    'drift': True,        # 61 contracts (1-hour funding)
+    'binance': True,      # 589 contracts
+    'kucoin': True,       # 519 contracts
+    'bybit': True,        # 663 contracts (linear + inverse)
+    'hyperliquid': True,  # 182 contracts (1-hour funding)
+    'aster': True,        # 120 contracts (4-hour funding)
+    'lighter': True,      # 91 contracts (8-hour DEX aggregator)
+    'backpack': True,     # 63 contracts (1-hour funding)
+    'drift': True,        # 48 contracts (1-hour funding)
     'deribit': False,     # Ready but disabled
     'kraken': False       # Ready but disabled
 }
@@ -334,9 +347,11 @@ HISTORICAL_WINDOW_DAYS = 30         # Default window size
 EXCHANGE_SCHEDULE = [
     ("binance", 0),       # Starts immediately
     ("kucoin", 30),       # 30s delay
-    ("backpack", 120),    # 120s delay
-    ("hyperliquid", 180), # 180s delay
-    ("aster", 210),       # 210s delay
+    ("bybit", 60),        # 60s delay
+    ("hyperliquid", 120), # 120s delay
+    ("aster", 150),       # 150s delay
+    ("lighter", 180),     # 180s delay
+    ("backpack", 210),    # 210s delay
     ("drift", 240)        # 240s delay
 ]
 
@@ -449,7 +464,7 @@ Response:
 ## Dashboard Features
 
 ### Asset Grid View
-- **Consolidated Display**: 600+ assets across all exchanges
+- **Consolidated Display**: 656 assets across all exchanges
 - **Multi-Exchange Columns**: Side-by-side comparison
 - **Expandable Details**: Click to see individual contracts
 - **Color Coding**: Visual indicators for rate direction
@@ -532,9 +547,11 @@ modular_exchange_system/
 │   ├── base_exchange.py           # Abstract base class
 │   ├── binance_exchange.py        # Binance integration
 │   ├── kucoin_exchange.py         # KuCoin integration
+│   ├── bybit_exchange.py          # ByBit integration
 │   ├── backpack_exchange.py       # Backpack integration
 │   ├── hyperliquid_exchange.py    # Hyperliquid integration
 │   ├── aster_exchange.py          # Aster DEX integration
+│   ├── lighter_exchange.py        # Lighter DEX aggregator integration
 │   ├── drift_exchange.py          # Drift Solana DEX integration
 │   ├── kraken_exchange.py         # Kraken (ready but disabled)
 │   ├── deribit_exchange.py        # Deribit (ready but disabled)
@@ -711,6 +728,20 @@ elif funding_interval_hours == 8:
   - `1000XUSDTM` → `X` (special case: 1000X is X token with 1000x denomination)
   - `1MBABYDOGEUSDTM` → `BABYDOGE` (1M = 1 Million denomination)
 
+#### ByBit
+- V5 API with versioned endpoints
+- Dual markets: Linear (USDT/USDC) and Inverse (USD) perpetuals
+- Mixed funding intervals across contracts (1h, 2h, 4h, 8h)
+- Cursor-based pagination for instruments (limit: 1000 per page)
+- Rate limit: 50 requests/second
+- Historical data: 200 records per request with pagination support
+- **Base Asset Normalization**: Uses baseCoin field from API, handles up to 8-digit multiplier prefixes
+  - `10000000SHIB` → `SHIB` (10 million multiplier)
+  - `1000000BABYDOGE` → `BABYDOGE` (1 million multiplier)
+  - `100000MOG` → `MOG` (100k multiplier)
+  - `10000LADYS` → `LADYS` (10k multiplier)
+  - `1000FLOKI` → `FLOKI` (1k multiplier)
+
 #### Backpack
 - USDC-margined contracts
 - Recently changed to all 1-hour funding
@@ -735,6 +766,18 @@ elif funding_interval_hours == 8:
   - `1000` prefix (e.g., `1000FLOKI` → `FLOKI`)
   - `k` prefix for thousands (e.g., `kX` → `X`)
   - Numerical prefix removal for clean asset names
+
+#### Lighter
+- DEX aggregator combining rates from multiple CEXs (Binance, OKX, ByBit)
+- 8-hour CEX-standard equivalent funding rate format
+- No authentication required for public REST API
+- Unique numeric market_id for each contract
+- 1-hour resolution historical data (up to 1000 records per request)
+- Rate conversion: Divides API rate by 8 for CEX-standard alignment
+- **Base Asset Normalization**: Handles standard multiplier prefixes
+  - `1000000XXX` → `XXX`, `100000XXX` → `XXX`, `10000XXX` → `XXX`, `1000XXX` → `XXX`
+  - `1MXXX` → `XXX` (1 million multiplier)
+  - `100XXX` → `XXX`, `kXXX` → `XXX`
 
 #### Drift
 - Solana-based DEX with 1-hour funding intervals
@@ -924,6 +967,30 @@ elif funding_interval_hours == 8:
 - **Fallback**: Graceful degradation to in-memory cache if Redis unavailable
 - **Performance**: <100ms API response times with caching
 
+#### Phase 34: ByBit and Lighter Exchange Integration (2025-10-13 - Completed)
+- **ByBit Integration**: 663 perpetual contracts (largest single exchange addition)
+  - 639 linear perpetual contracts (USDT/USDC-margined)
+  - 24 inverse perpetual contracts (USD-margined)
+  - V5 API with cursor-based pagination
+  - Mixed funding intervals: 4h (52.3%), 8h (38.8%), 1h (5.9%), 2h (3.0%)
+  - Rate limit: 50 req/s with automatic pagination handling
+  - Base asset normalization handles up to 8-digit multiplier prefixes
+- **Lighter Integration**: 91 contracts from DEX aggregator
+  - Aggregates funding rates from Binance, OKX, and ByBit
+  - 8-hour CEX-standard equivalent rate format
+  - Unique market_id system for contract identification
+  - 1-hour resolution historical data support
+  - Rate conversion logic for CEX-standard alignment
+- **Enhanced Dashboard Features**:
+  - Exchange Filter System with multi-select and persistence
+  - Custom hooks (useExchangeFilter, useFilterPersistence, useFilterURL)
+  - New UI cards (APRExtremeCard, DashboardStatsCard, SystemOverviewCard)
+  - Arbitrage Historical Chart component
+  - Modern UI components (ModernMultiSelect, ModernPagination, ModernTooltip)
+  - Filter state synchronization with URL parameters and localStorage
+- **System Expansion**: Total contracts increased from 1,403 to 2,275 (+62%)
+- **Asset Coverage**: Unique assets expanded from 600+ to 656
+
 ### Critical Fixes Implemented
 1. **Funding Interval Detection**: Fixed 333 contracts with incorrect APR
 2. **Multi-Contract Chart Alignment**: Timestamp normalization
@@ -943,9 +1010,9 @@ elif funding_interval_hours == 8:
 ## Performance Metrics
 
 ### System Performance
-- **Total Contracts**: 1,403 across 6 exchanges
-- **Unique Assets**: 600+ consolidated view
-- **Update Cycle**: 30 seconds with sequential collection
+- **Total Contracts**: 2,275 across 8 exchanges
+- **Unique Assets**: 656 consolidated view
+- **Update Cycle**: 30 seconds with parallel collection (default)
 - **API Response**: <100ms with Redis caching
 - **Dashboard Load**: ~2 seconds initial
 - **Chart Rendering**: Smooth with forward-fill normalization
@@ -962,7 +1029,7 @@ elif funding_interval_hours == 8:
 ### Current Status (MVP)
 - **Uptime**: System runs continuously when started
 - **Error Recovery**: Basic retry mechanisms in place
-- **Data Collection**: Functional across 4 exchanges
+- **Data Collection**: Functional across 8 exchanges
 - **Known Limitations**: This is an MVP with basic functionality
 
 ## Troubleshooting
@@ -1107,9 +1174,11 @@ cd dashboard && npm test
 # Test exchange connections
 python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(f'Binance: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.kucoin_exchange import KuCoinExchange; e=KuCoinExchange(); print(f'KuCoin: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.bybit_exchange import ByBitExchange; e=ByBitExchange(); print(f'ByBit: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.backpack_exchange import BackpackExchange; e=BackpackExchange(); print(f'Backpack: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.hyperliquid_exchange import HyperliquidExchange; e=HyperliquidExchange(); print(f'Hyperliquid: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.aster_exchange import AsterExchange; e=AsterExchange(); print(f'Aster: {len(e.fetch_data())} contracts')"
+python -c "from exchanges.lighter_exchange import LighterExchange; e=LighterExchange(); print(f'Lighter: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.drift_exchange import DriftExchange; e=DriftExchange(); print(f'Drift: {len(e.fetch_data())} contracts')"
 ```
 
@@ -1147,10 +1216,10 @@ python scripts/unified_historical_backfill.py --days 30 --parallel --loop-hourly
 
 ---
 
-*Last Updated: 2025-12-27*
+*Last Updated: 2025-10-13*
 *Version: MVP*
-*Total Contracts: 1,403*
-*Active Exchanges: 6*
-*Unique Assets: 600+*
+*Total Contracts: 2,275*
+*Active Exchanges: 8*
+*Unique Assets: 656*
 *Project Status: MVP - Not production ready*
 *Note: This is a minimum viable product for demonstration and development purposes*

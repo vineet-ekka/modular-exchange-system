@@ -2,8 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import DashboardPage from './pages/DashboardPage';
 import HistoricalFundingPage from './pages/HistoricalFundingPage';
-import SettingsPage from './pages/SettingsPage';
 import ArbitragePage from './pages/ArbitragePage';
+import ArbitrageDetailPage from './pages/ArbitrageDetailPage';
 import BackfillProgress from './components/BackfillProgress';
 
 function App() {
@@ -14,12 +14,12 @@ function App() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/arbitrage" element={<ArbitragePage />} />
+        <Route path="/arbitrage/:asset/:longExchange/:shortExchange" element={<ArbitrageDetailPage />} />
         {/* New contract-specific routes */}
         <Route path="/historical/:exchange/:symbol" element={<HistoricalFundingPage />} />
         {/* Keep old routes for backward compatibility */}
         <Route path="/historical/:asset" element={<HistoricalFundingPage />} />
         <Route path="/asset/:asset" element={<HistoricalFundingPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </Router>
   );

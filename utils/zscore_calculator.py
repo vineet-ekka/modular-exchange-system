@@ -1203,9 +1203,9 @@ class ZScoreCalculator:
         
         # Performance check
         if total_duration <= 1.0:
-            self.logger.info(f"✅ Performance target MET: {total_duration:.3f}s <= 1.0s")
+            self.logger.info(f"Performance target MET: {total_duration:.3f}s <= 1.0s")
         else:
-            self.logger.warning(f"⚠️ Performance target MISSED: {total_duration:.3f}s > 1.0s (Target improvement needed)")
+            self.logger.warning(f"Performance target MISSED: {total_duration:.3f}s > 1.0s (Target improvement needed)")
         
         return summary
 
@@ -1250,5 +1250,92 @@ def test_calculator():
         print(f"Test failed: {e}")
 
 
+def main():
+    """Main loop for continuous Z-score calculation."""
+    import time
+    import psycopg2
+    from config.settings import (
+        POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE,
+        POSTGRES_USER, POSTGRES_PASSWORD
+    )
+
+    logger = setup_logger("ZScoreCalculatorMain")
+    logger.info("Starting Z-score calculator service...")
+
+    # Configuration
+    UPDATE_INTERVAL = 60  # Update every 60 seconds
+    ERROR_RETRY_DELAY = 30  # Wait 30 seconds after error
+
+    # Statistics
+    update_count = 0
+    error_count = 0
+
+    while True:
+        try:
+            # Get database connection
+            conn = psycopg2.connect(
+                host=POSTGRES_HOST,
+                port=POSTGRES_PORT,
+                database=POSTGRES_DATABASE,
+                user=POSTGRES_USER,
+                password=POSTGRES_PASSWORD
+            )
+
+            # Create calculator instance
+            calculator = ZScoreCalculator(conn, window_days=30)
+
+            # Process all contracts
+            logger.info("Calculating Z-scores for all contracts...")
+            start_time = time.time()
+
+            # Get all unique contracts
+            query = """
+                SELECT DISTINCT exchange, symbol
+                FROM exchange_data
+                WHERE funding_rate IS NOT NULL
+                ORDER BY exchange, symbol
+            """
+            calculator.cursor.execute(query)
+            contracts = calculator.cursor.fetchall()
+
+            processed = 0
+            for exchange, symbol in contracts:
+                try:
+                    calculator.calculate_zscore(exchange, symbol)
+                    processed += 1
+                except Exception as e:
+                    logger.debug(f"Error processing {exchange} {symbol}: {e}")
+
+            duration = time.time() - start_time
+            update_count += 1
+
+            logger.info(f"Update #{update_count}: Processed {processed}/{len(contracts)} contracts in {duration:.2f}s")
+
+            # Close connection
+            conn.close()
+
+            # Print status every 10 updates
+            if update_count % 10 == 0:
+                logger.info(f"Status: {update_count} successful updates, {error_count} errors")
+
+            # Wait before next update
+            time.sleep(UPDATE_INTERVAL)
+
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal, shutting down...")
+            break
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Error in main loop: {e}")
+            time.sleep(ERROR_RETRY_DELAY)
+
+    logger.info(f"Z-score calculator stopped. Total updates: {update_count}, Errors: {error_count}")
+
 if __name__ == "__main__":
-    test_calculator()
+    import sys
+
+    # Check command line arguments
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        test_calculator()
+    else:
+        main()

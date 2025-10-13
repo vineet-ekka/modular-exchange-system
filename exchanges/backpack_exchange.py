@@ -47,7 +47,11 @@ class BackpackExchange(BaseExchange):
             
             # Filter for only PERP marketType
             perp_df = df[df['marketType'] == 'PERP'].copy()
-            
+
+            # Filter out invisible/delisted markets
+            if 'visible' in perp_df.columns:
+                perp_df = perp_df[perp_df['visible'] == True].copy()
+
             # Merge the DataFrames
             merged_df = perp_df.merge(
                 mark_prices_df[['symbol', 'fundingRate', 'indexPrice', 'markPrice']], 
@@ -131,9 +135,9 @@ class BackpackExchange(BaseExchange):
         """
         try:
             # Calculate how many records we need (considering funding intervals)
-            # Worst case: 4-hour intervals = 6 per day
-            estimated_records = days * 6
-            limit = min(1000, estimated_records * 2)  # Request extra to be safe
+            # Backpack uses 1-hour funding intervals = 24 per day
+            estimated_records = days * 24
+            limit = min(10000, estimated_records * 2)  # Use API's maximum limit of 10000
             
             all_rates = []
             offset = 0

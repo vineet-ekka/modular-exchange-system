@@ -23,10 +23,14 @@ from exchanges.binance_exchange import BinanceExchange
 from exchanges.kucoin_exchange import KuCoinExchange
 from exchanges.backpack_exchange import BackpackExchange
 from exchanges.hyperliquid_exchange import HyperliquidExchange
+from exchanges.drift_exchange import DriftExchange
+from exchanges.aster_exchange import AsterExchange
+from exchanges.lighter_exchange import LighterExchange
+from exchanges.bybit_exchange import ByBitExchange
 from database.postgres_manager import PostgresManager
 from utils.logger import setup_logger
 from config.settings import (
-    EXCHANGES, 
+    EXCHANGES,
     HISTORICAL_SYNC_ENABLED,
     HISTORICAL_ALIGN_TO_MIDNIGHT,
     HISTORICAL_WINDOW_DAYS
@@ -40,6 +44,10 @@ EXCHANGE_CLASSES = {
     'kucoin': KuCoinExchange,
     'backpack': BackpackExchange,
     'hyperliquid': HyperliquidExchange,
+    'drift': DriftExchange,
+    'aster': AsterExchange,
+    'lighter': LighterExchange,
+    'bybit': ByBitExchange,
     # Add more exchanges here as they get historical support
 }
 
@@ -47,22 +55,25 @@ EXCHANGE_CLASSES = {
 class UnifiedBackfill:
     """Unified backfill coordinator for multiple exchanges."""
     
-    def __init__(self, days: int = 30, batch_size: int = 10, dry_run: bool = False, 
-                 align_to_midnight: bool = None, sync_enabled: bool = None):
+    def __init__(self, days: int = 30, batch_size: int = 10, dry_run: bool = False,
+                 align_to_midnight: bool = None, sync_enabled: bool = None,
+                 is_loop_mode: bool = False):
         """
         Initialize unified backfill.
-        
+
         Args:
             days: Number of days to backfill
             batch_size: Number of symbols to process per batch
             dry_run: If True, fetch data but don't upload to database
             align_to_midnight: If True, align dates to midnight UTC (uses config if None)
             sync_enabled: If True, use synchronized dates (uses config if None)
+            is_loop_mode: If True, running in loop mode (disables lock conflicts)
         """
         self.days = days
         self.batch_size = batch_size
         self.dry_run = dry_run
         self.db_manager = None
+        self.is_loop_mode = is_loop_mode
         
         # Use config values if not explicitly provided
         self.sync_enabled = sync_enabled if sync_enabled is not None else HISTORICAL_SYNC_ENABLED
@@ -89,35 +100,45 @@ class UnifiedBackfill:
     
     def _calculate_unified_dates(self):
         """Calculate unified start and end dates for all exchanges."""
-        # Calculate end time
+        # Calculate end time - always use current time to get latest data
         self.unified_end_time = datetime.now(timezone.utc)
-        
-        # Align to midnight if configured
-        if self.align_to_midnight:
-            self.unified_end_time = self.unified_end_time.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-        
+
         # Calculate start time
         self.unified_start_time = self.unified_end_time - timedelta(days=self.days)
-        
+
+        # Align start time to midnight if configured (for clean historical window)
+        # But keep end time as current time to include today's recent hours
+        if self.align_to_midnight:
+            self.unified_start_time = self.unified_start_time.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+
         logger.info(f"Unified date range calculated:")
         logger.info(f"  Start: {self.unified_start_time.isoformat()}")
         logger.info(f"  End: {self.unified_end_time.isoformat()}")
-        logger.info(f"  Aligned to midnight: {self.align_to_midnight}")
+        logger.info(f"  Start aligned to midnight: {self.align_to_midnight}")
         
     def initialize(self) -> bool:
         """Initialize database connection and check prerequisites."""
         try:
-            # Check for existing lock
-            if self.lock_file.exists() or self.dashboard_lock_file.exists():
-                lock_age = time.time() - self.lock_file.stat().st_mtime if self.lock_file.exists() else 0
-                dash_lock_age = time.time() - self.dashboard_lock_file.stat().st_mtime if self.dashboard_lock_file.exists() else 0
-                if lock_age < 600 or dash_lock_age < 600:  # Less than 10 minutes old
-                    logger.warning("Another backfill is already running!")
-                    logger.warning("If this is incorrect, delete .unified_backfill.lock and .backfill.lock")
-                    return False
-            
+            # In loop mode, force cleanup of any existing locks first
+            if self.is_loop_mode:
+                if self.lock_file.exists():
+                    logger.info("Loop mode: Removing existing unified backfill lock")
+                    self.lock_file.unlink()
+                if self.dashboard_lock_file.exists():
+                    logger.info("Loop mode: Removing existing dashboard lock")
+                    self.dashboard_lock_file.unlink()
+            else:
+                # Check for existing lock (only in non-loop mode)
+                if self.lock_file.exists() or self.dashboard_lock_file.exists():
+                    lock_age = time.time() - self.lock_file.stat().st_mtime if self.lock_file.exists() else 0
+                    dash_lock_age = time.time() - self.dashboard_lock_file.stat().st_mtime if self.dashboard_lock_file.exists() else 0
+                    if lock_age < 600 or dash_lock_age < 600:  # Less than 10 minutes old
+                        logger.warning("Another backfill is already running!")
+                        logger.warning("If this is incorrect, delete .unified_backfill.lock and .backfill.lock")
+                        return False
+
             # Create lock files
             self.lock_file.touch()
             self.dashboard_lock_file.touch()
@@ -145,8 +166,9 @@ class UnifiedBackfill:
         if self.dashboard_lock_file.exists():
             self.dashboard_lock_file.unlink()
     
-    def update_progress(self, exchange: str, symbols_processed: int, total_symbols: int, 
-                       records_fetched: int, status: str = "processing", completeness_data: dict = None):
+    def update_progress(self, exchange: str, symbols_processed: int, total_symbols: int,
+                       records_fetched: int, status: str = "processing", completeness_data: dict = None,
+                       price_assets: int = 0):
         """Update progress for an exchange with optional completeness data."""
         with self.lock:
             self.progress_data[exchange] = {
@@ -154,7 +176,8 @@ class UnifiedBackfill:
                 'total_symbols': total_symbols,
                 'records_fetched': records_fetched,
                 'status': status,
-                'progress': int((symbols_processed / total_symbols * 100)) if total_symbols > 0 else 0
+                'progress': int((symbols_processed / total_symbols * 100)) if total_symbols > 0 else 0,
+                'price_assets': price_assets
             }
             
             # Store completeness data if provided
@@ -257,7 +280,7 @@ class UnifiedBackfill:
             if historical_df.empty:
                 logger.warning(f"No historical data fetched for {exchange_name}")
                 self.update_progress(exchange_name, 0, 0, 0, "no_data")
-                return (exchange_name, 0, False)
+                return (exchange_name, 0, False, 0)
             
             elapsed_time = time.time() - start_time
             logger.info(f"="*60)
@@ -306,17 +329,22 @@ class UnifiedBackfill:
                 
                 if success:
                     upload_time = time.time() - upload_start
-                    logger.info(f"{exchange_name}: Uploaded in {upload_time:.2f}s")
-                    self.update_progress(exchange_name, 
+                    logger.info(f"{exchange_name}: Uploaded funding rates in {upload_time:.2f}s")
+
+                    # Price collection feature not yet implemented
+                    price_assets_collected = 0
+
+                    self.update_progress(exchange_name,
                                        historical_df['symbol'].nunique(),
                                        historical_df['symbol'].nunique(),
                                        len(historical_df), "completed",
-                                       completeness_data=completeness_data)
-                    return (exchange_name, len(historical_df), True)
+                                       completeness_data=completeness_data,
+                                       price_assets=price_assets_collected)
+                    return (exchange_name, len(historical_df), True, price_assets_collected)
                 else:
                     logger.error(f"Failed to upload {exchange_name} data")
                     self.update_progress(exchange_name, 0, 0, 0, "upload_failed")
-                    return (exchange_name, 0, False)
+                    return (exchange_name, 0, False, 0)
             else:
                 # Dry run - just return stats
                 self.update_progress(exchange_name,
@@ -324,14 +352,14 @@ class UnifiedBackfill:
                                    historical_df['symbol'].nunique(),
                                    len(historical_df), "completed_dry_run",
                                    completeness_data=completeness_data)
-                return (exchange_name, len(historical_df), True)
-                
+                return (exchange_name, len(historical_df), True, 0)
+
         except Exception as e:
             logger.error(f"Error backfilling {exchange_name}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             self.update_progress(exchange_name, 0, 0, 0, "error")
-            return (exchange_name, 0, False)
+            return (exchange_name, 0, False, 0)
     
     def run_parallel(self, exchanges: List[str], max_workers: int = 2) -> bool:
         """
@@ -359,24 +387,26 @@ class UnifiedBackfill:
             
             # Process results as they complete
             for future in as_completed(futures):
-                exchange_name, records, success = future.result()
+                exchange_name, records, success, price_assets = future.result()
                 results.append({
                     'exchange': exchange_name,
                     'records': records,
-                    'success': success
+                    'success': success,
+                    'price_assets': price_assets
                 })
-                
+
                 if not success:
                     all_success = False
                 total_records += records
-        
+
         # Final summary
         logger.info("="*60)
         logger.info("BACKFILL SUMMARY")
         logger.info("="*60)
         for result in results:
             status = "✓" if result['success'] else "✗"
-            logger.info(f"{status} {result['exchange']}: {result['records']} records")
+            price_info = f", {result['price_assets']} assets with prices" if result['price_assets'] > 0 else ""
+            logger.info(f"{status} {result['exchange']}: {result['records']} funding records{price_info}")
         logger.info(f"Total records: {total_records}")
         logger.info("="*60)
         
@@ -399,24 +429,26 @@ class UnifiedBackfill:
         results = []
         
         for exchange in exchanges:
-            exchange_name, records, success = self.backfill_exchange(exchange)
+            exchange_name, records, success, price_assets = self.backfill_exchange(exchange)
             results.append({
                 'exchange': exchange_name,
                 'records': records,
-                'success': success
+                'success': success,
+                'price_assets': price_assets
             })
-            
+
             if not success:
                 all_success = False
             total_records += records
-        
+
         # Final summary
         logger.info("="*60)
         logger.info("BACKFILL SUMMARY")
         logger.info("="*60)
         for result in results:
             status = "✓" if result['success'] else "✗"
-            logger.info(f"{status} {result['exchange']}: {result['records']} records")
+            price_info = f", {result['price_assets']} assets with prices" if result['price_assets'] > 0 else ""
+            logger.info(f"{status} {result['exchange']}: {result['records']} funding records{price_info}")
         logger.info(f"Total records: {total_records}")
         logger.info("="*60)
         
@@ -461,7 +493,12 @@ def main():
         action='store_true',
         help='Fetch data but do not upload to database'
     )
-    
+    parser.add_argument(
+        '--loop-hourly',
+        action='store_true',
+        help='Run continuously at the start of every UTC hour (XX:00)'
+    )
+
     args = parser.parse_args()
     
     # Determine which exchanges to backfill
@@ -493,66 +530,167 @@ def main():
     if args.parallel:
         logger.info(f"Max workers: {args.max_workers}")
     logger.info(f"Dry run: {args.dry_run}")
+    logger.info(f"Loop mode: {'HOURLY UTC' if args.loop_hourly else 'SINGLE RUN'}")
     logger.info("="*60)
     
-    # Create backfill coordinator
-    backfill = UnifiedBackfill(
-        days=args.days,
-        batch_size=args.batch_size,
-        dry_run=args.dry_run
-    )
-    
-    # Initialize
-    if not backfill.initialize():
-        logger.error("Failed to initialize backfill")
-        sys.exit(1)
-    
-    try:
-        # Run backfill
-        start_time = time.time()
-        
-        if args.parallel:
-            success = backfill.run_parallel(exchanges, args.max_workers)
-        else:
-            success = backfill.run_sequential(exchanges)
-        
-        total_time = time.time() - start_time
-        
-        # Final status
-        logger.info(f"Total backfill time: {total_time:.2f} seconds")
-        
-        if success:
-            logger.info("="*60)
-            logger.info("UNIFIED BACKFILL COMPLETED SUCCESSFULLY")
-            logger.info("="*60)
-            
-            # Write final status
-            final_status = {
-                'running': False,
-                'overall_progress': 100,
-                'exchanges': backfill.progress_data,
-                'message': "Backfill completed successfully",
-                'completed': True,
-                'total_time': total_time
-            }
-            backfill.status_file.write_text(json.dumps(final_status, indent=2))
-        else:
-            logger.error("="*60)
-            logger.error("UNIFIED BACKFILL COMPLETED WITH ERRORS")
-            logger.error("="*60)
-            
-        sys.exit(0 if success else 1)
-        
-    except KeyboardInterrupt:
-        logger.warning("Backfill interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        sys.exit(1)
-    finally:
-        backfill.cleanup()
+    # Function to calculate seconds until next UTC hour
+    def seconds_until_next_hour():
+        """Calculate seconds until the next UTC hour (XX:00:00)."""
+        now = datetime.now(timezone.utc)
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return (next_hour - now).total_seconds()
+
+    # Function to run a single backfill iteration
+    def run_backfill_iteration(run_number=None, is_loop_mode=False):
+        """Run a single backfill iteration."""
+        # Create backfill coordinator
+        backfill = UnifiedBackfill(
+            days=args.days,
+            batch_size=args.batch_size,
+            dry_run=args.dry_run,
+            is_loop_mode=is_loop_mode
+        )
+
+        # Initialize
+        if not backfill.initialize():
+            logger.error("Failed to initialize backfill")
+            return False
+
+        try:
+            # Run backfill
+            start_time = time.time()
+
+            if args.parallel:
+                success = backfill.run_parallel(exchanges, args.max_workers)
+            else:
+                success = backfill.run_sequential(exchanges)
+
+            total_time = time.time() - start_time
+
+            # Final status
+            logger.info(f"Total backfill time: {total_time:.2f} seconds")
+
+            if success:
+                logger.info("="*60)
+                if run_number:
+                    logger.info(f"BACKFILL RUN #{run_number} COMPLETED SUCCESSFULLY")
+                else:
+                    logger.info("UNIFIED BACKFILL COMPLETED SUCCESSFULLY")
+                logger.info("="*60)
+
+                # Write final status
+                final_status = {
+                    'running': False,
+                    'overall_progress': 100,
+                    'exchanges': backfill.progress_data,
+                    'message': "Backfill completed successfully",
+                    'completed': True,
+                    'total_time': total_time,
+                    'run_number': run_number
+                }
+                backfill.status_file.write_text(json.dumps(final_status, indent=2))
+            else:
+                logger.error("="*60)
+                if run_number:
+                    logger.error(f"BACKFILL RUN #{run_number} COMPLETED WITH ERRORS")
+                else:
+                    logger.error("UNIFIED BACKFILL COMPLETED WITH ERRORS")
+                logger.error("="*60)
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+        finally:
+            backfill.cleanup()
+
+    # Main execution logic
+    if args.loop_hourly:
+        # Hourly loop mode
+        logger.info("Starting hourly backfill loop. Press Ctrl+C to stop.")
+
+        # Loop statistics
+        loop_stats = {
+            'total_runs': 0,
+            'successful_runs': 0,
+            'failed_runs': 0,
+            'start_time': datetime.now(timezone.utc)
+        }
+
+        try:
+            while True:
+                # Calculate time until next hour
+                wait_seconds = seconds_until_next_hour()
+                next_run_time = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
+
+                # If we're very close to the hour (within 5 seconds), run immediately
+                if wait_seconds > 5:
+                    logger.info(f"Next backfill scheduled for: {next_run_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+                    logger.info(f"Waiting {int(wait_seconds)} seconds ({wait_seconds/60:.1f} minutes)...")
+
+                    # Sleep with periodic updates
+                    while wait_seconds > 60:
+                        time.sleep(60)
+                        wait_seconds = seconds_until_next_hour()
+                        if wait_seconds > 60:
+                            logger.info(f"Time remaining: {int(wait_seconds)} seconds ({wait_seconds/60:.1f} minutes)")
+
+                    # Sleep for remaining seconds
+                    if wait_seconds > 0:
+                        time.sleep(wait_seconds)
+
+                # Run backfill
+                loop_stats['total_runs'] += 1
+                current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+                # Force cleanup any stale locks before starting (extra safety for loop mode)
+                lock_files_to_clean = [Path(".unified_backfill.lock"), Path(".backfill.lock")]
+                for lock_file in lock_files_to_clean:
+                    if lock_file.exists():
+                        try:
+                            lock_file.unlink()
+                            logger.debug(f"Cleaned up stale lock file: {lock_file}")
+                        except Exception as e:
+                            logger.warning(f"Could not remove lock file {lock_file}: {e}")
+
+                logger.info("="*60)
+                logger.info(f"[{current_time}] STARTING HOURLY BACKFILL RUN #{loop_stats['total_runs']}")
+                logger.info("="*60)
+
+                success = run_backfill_iteration(loop_stats['total_runs'], is_loop_mode=True)
+
+                if success:
+                    loop_stats['successful_runs'] += 1
+                else:
+                    loop_stats['failed_runs'] += 1
+
+                # Print loop statistics
+                uptime = datetime.now(timezone.utc) - loop_stats['start_time']
+                logger.info("="*60)
+                logger.info("HOURLY LOOP STATISTICS")
+                logger.info(f"Total runs: {loop_stats['total_runs']}")
+                logger.info(f"Successful: {loop_stats['successful_runs']}")
+                logger.info(f"Failed: {loop_stats['failed_runs']}")
+                logger.info(f"Success rate: {loop_stats['successful_runs']/loop_stats['total_runs']*100:.1f}%")
+                logger.info(f"Uptime: {str(uptime).split('.')[0]}")
+                logger.info("="*60)
+
+        except KeyboardInterrupt:
+            logger.warning("\nHourly backfill loop interrupted by user")
+            logger.info(f"Completed {loop_stats['total_runs']} runs ({loop_stats['successful_runs']} successful)")
+            sys.exit(0)
+
+    else:
+        # Single run mode (original behavior)
+        try:
+            success = run_backfill_iteration()
+            sys.exit(0 if success else 1)
+        except KeyboardInterrupt:
+            logger.warning("Backfill interrupted by user")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

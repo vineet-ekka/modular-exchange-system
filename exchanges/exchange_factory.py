@@ -17,6 +17,10 @@ from .backpack_exchange import BackpackExchange
 from .binance_exchange import BinanceExchange
 from .kucoin_exchange import KuCoinExchange
 from .hyperliquid_exchange import HyperliquidExchange
+from .drift_exchange import DriftExchange
+from .aster_exchange import AsterExchange
+from .lighter_exchange import LighterExchange
+from .bybit_exchange import ByBitExchange
 # from .deribit_exchange import DeribitExchange  # Not implemented yet
 # from .kraken_exchange import KrakenExchange  # Not implemented yet
 
@@ -78,6 +82,10 @@ class ExchangeFactory:
             'binance': BinanceExchange,
             'kucoin': KuCoinExchange,
             'hyperliquid': HyperliquidExchange,
+            'drift': DriftExchange,
+            'aster': AsterExchange,
+            'lighter': LighterExchange,
+            'bybit': ByBitExchange,
             # 'deribit': DeribitExchange,  # Not implemented yet
             # 'kraken': KrakenExchange,  # Not implemented yet
             # Add new exchanges here as they become available
@@ -146,8 +154,8 @@ class ExchangeFactory:
         batch_id = str(uuid.uuid4())[:8]  # Short ID for readability
         batch_timestamp = datetime.now(timezone.utc)
 
-        print(f"\n[Parallel Collection] Starting batch {batch_id} at {batch_timestamp.strftime('%H:%M:%S.%f')[:-3]} UTC")
-        print(f"[Parallel Collection] Processing {len(self.get_enabled_exchanges())} exchanges simultaneously...")
+        print(f"\n[Parallel Collection] Starting batch {batch_id} at {batch_timestamp.strftime('%H:%M:%S.%f')[:-3]} UTC", flush=True)
+        print(f"[Parallel Collection] Processing {len(self.get_enabled_exchanges())} exchanges simultaneously...", flush=True)
 
         # Reset metrics
         self.last_collection_metrics = {
@@ -171,49 +179,56 @@ class ExchangeFactory:
                                        exchange, batch_id, batch_timestamp)
                 future_to_exchange[future] = exchange
 
-            # Collect results as they complete with timeout
-            for future in as_completed(future_to_exchange, timeout=30):
-                exchange = future_to_exchange[future]
-                try:
-                    data, duration_ms = future.result(timeout=15)
+            # Collect results as they complete with timeout (increased to 120s for slow exchanges like Aster)
+            try:
+                for future in as_completed(future_to_exchange, timeout=120):
+                    exchange = future_to_exchange[future]
+                    try:
+                        data, duration_ms = future.result(timeout=60)
 
-                    # Track metrics
-                    self.last_collection_metrics['exchanges'][exchange.name] = {
-                        'duration_ms': duration_ms,
-                        'record_count': len(data) if not data.empty else 0,
-                        'status': 'success'
-                    }
+                        # Track metrics
+                        self.last_collection_metrics['exchanges'][exchange.name] = {
+                            'duration_ms': duration_ms,
+                            'record_count': len(data) if not data.empty else 0,
+                            'status': 'success'
+                        }
 
-                    if not data.empty:
-                        # Add batch tracking columns
-                        data['batch_id'] = batch_id
-                        data['collection_timestamp'] = batch_timestamp
-                        all_data.append(data)
-                        self.last_collection_metrics['success_count'] += 1
-                        print(f"  [OK] {exchange.name}: {len(data)} contracts in {duration_ms:.0f}ms")
-                    else:
-                        print(f"  [!] {exchange.name}: No data retrieved in {duration_ms:.0f}ms")
+                        if not data.empty:
+                            # Add batch tracking columns
+                            data['batch_id'] = batch_id
+                            data['collection_timestamp'] = batch_timestamp
+                            all_data.append(data)
+                            self.last_collection_metrics['success_count'] += 1
+                            print(f"  [OK] {exchange.name}: {len(data)} contracts in {duration_ms:.0f}ms", flush=True)
+                        else:
+                            print(f"  [!] {exchange.name}: No data retrieved in {duration_ms:.0f}ms", flush=True)
 
-                except TimeoutError:
-                    self.last_collection_metrics['exchanges'][exchange.name] = {
-                        'duration_ms': 15000,
-                        'record_count': 0,
-                        'status': 'timeout'
-                    }
-                    self.last_collection_metrics['failure_count'] += 1
-                    print(f"  [X] {exchange.name}: TIMEOUT after 15s")
-                    self.logger.error(f"Exchange {exchange.name} timed out after 15 seconds")
+                    except TimeoutError:
+                        self.last_collection_metrics['exchanges'][exchange.name] = {
+                            'duration_ms': 60000,
+                            'record_count': 0,
+                            'status': 'timeout'
+                        }
+                        self.last_collection_metrics['failure_count'] += 1
+                        print(f"  [X] {exchange.name}: TIMEOUT after 60s", flush=True)
+                        self.logger.error(f"Exchange {exchange.name} timed out after 60 seconds")
 
-                except Exception as e:
-                    self.last_collection_metrics['exchanges'][exchange.name] = {
-                        'duration_ms': 0,
-                        'record_count': 0,
-                        'status': 'error',
-                        'error': str(e)
-                    }
-                    self.last_collection_metrics['failure_count'] += 1
-                    print(f"  [X] {exchange.name}: ERROR - {str(e)[:50]}")
-                    self.logger.error(f"Exchange {exchange.name} failed: {str(e)}")
+                    except Exception as e:
+                        self.last_collection_metrics['exchanges'][exchange.name] = {
+                            'duration_ms': 0,
+                            'record_count': 0,
+                            'status': 'error',
+                            'error': str(e)
+                        }
+                        self.last_collection_metrics['failure_count'] += 1
+                        print(f"  [X] {exchange.name}: ERROR - {str(e)[:50]}", flush=True)
+                        self.logger.error(f"Exchange {exchange.name} failed: {str(e)}")
+
+            except TimeoutError as e:
+                # Handle timeout for the entire as_completed loop
+                print(f"\n[Parallel Collection] WARNING: Collection timed out after 120 seconds", flush=True)
+                self.logger.error(f"Parallel collection timed out: {str(e)}")
+                # Continue with whatever data we collected so far
 
         # Calculate total collection time
         collection_duration = (time.time() - collection_start) * 1000

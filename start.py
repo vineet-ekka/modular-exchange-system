@@ -328,21 +328,21 @@ def start_react_dashboard():
 def start_data_collector(quiet=True):
     """Start the data collection system."""
     print_status("Starting data collector...", "info")
-    
+
     try:
         # Use 30-second intervals for real-time updates
         cmd = [sys.executable, "main.py", "--loop", "--interval", "30"]
         if quiet:
             cmd.append("--quiet")
-        
+
         # Check if main.py exists first
         if not Path("main.py").exists():
             print_status("main.py not found in current directory", "error")
             return False
-        
+
         # Create a log file for the data collector
         log_file = Path("data_collector.log")
-        
+
         if sys.platform == "win32":
             # On Windows, write output to a log file instead of creating new console
             with open(log_file, "w") as log:
@@ -361,10 +361,10 @@ def start_data_collector(quiet=True):
                     stderr=subprocess.STDOUT,
                     cwd=Path.cwd()
                 )
-        
+
         # Wait a moment to check if process started successfully
         time.sleep(2)
-        
+
         # Check if process is still running
         if process.poll() is None:
             print_status("Data collector started (30-second intervals for real-time updates)", "success")
@@ -374,11 +374,143 @@ def start_data_collector(quiet=True):
             print_status("Data collector failed to start. Check data_collector.log for details", "warning")
             print("   You can start it manually with: python main.py --loop --interval 30")
             return False
-        
+
     except Exception as e:
         print_status(f"Failed to start data collector: {e}", "warning")
         print("   You can start it manually later with: python main.py --loop --interval 30")
         return False
+
+def backfill_arbitrage_spreads():
+    """Backfill historical arbitrage spreads from funding data."""
+    print_status("Checking historical arbitrage spreads...", "info")
+
+    try:
+        # Check if backfill script exists (try v2 first, then v1)
+        backfill_script = Path("scripts/backfill_arbitrage_spreads_v2.py")
+        if not backfill_script.exists():
+            backfill_script = Path("scripts/backfill_arbitrage_spreads.py")
+        if not backfill_script.exists():
+            print_status("backfill_arbitrage_spreads.py not found", "warning")
+            return False
+
+        # Run the backfill script (synchronously to ensure data is ready)
+        print_status("Populating 30-day spread history...", "info")
+        result = subprocess.run(
+            [sys.executable, str(backfill_script), "--days", "30"],
+            capture_output=True,
+            text=True,
+            timeout=60  # Give it up to 60 seconds
+        )
+
+        if result.returncode == 0:
+            print_status("Historical spreads populated successfully", "success")
+            return True
+        else:
+            print_status("Spread backfill completed with warnings", "warning")
+            return True  # Don't fail startup
+
+    except subprocess.TimeoutExpired:
+        print_status("Spread backfill taking longer than expected (continuing)", "warning")
+        return True
+    except Exception as e:
+        print_status(f"Error during spread backfill: {e}", "warning")
+        return True  # Don't fail startup
+
+def start_spread_collector():
+    """Start the arbitrage spread history collector."""
+    print_status("Starting arbitrage spread collector...", "info")
+
+    try:
+        # Check if the script exists
+        spread_script = Path("scripts/collect_spread_history.py")
+        if not spread_script.exists():
+            print_status("collect_spread_history.py not found", "warning")
+            return False
+
+        # Create a log file for the spread collector
+        log_file = Path("spread_collector.log")
+
+        # Start the spread collector in background
+        if sys.platform == "win32":
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    [sys.executable, str(spread_script)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd(),
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+        else:
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    [sys.executable, str(spread_script)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd()
+                )
+
+        # Wait a moment to check if process started
+        time.sleep(2)
+
+        if process.poll() is None:
+            print_status("Arbitrage spread collector started (ongoing collection)", "success")
+            print_status(f"Spread collector log: {log_file}", "info")
+            return True
+        else:
+            print_status("Spread collector failed to start", "warning")
+            return False
+
+    except Exception as e:
+        print_status(f"Failed to start spread collector: {e}", "warning")
+        return False
+
+def start_zscore_calculator():
+    """Start the Z-score calculator for funding rate statistics."""
+    print_status("Starting Z-score calculator...", "info")
+
+    try:
+        # Check if the script exists
+        zscore_script = Path("utils/zscore_calculator.py")
+        if not zscore_script.exists():
+            print_status("zscore_calculator.py not found", "warning")
+            return False
+
+        # Create a log file
+        log_file = Path("zscore_calculator.log")
+
+        # Start in background
+        if sys.platform == "win32":
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    [sys.executable, str(zscore_script)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd(),
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+        else:
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    [sys.executable, str(zscore_script)],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    cwd=Path.cwd()
+                )
+
+        # Check if started
+        time.sleep(2)
+        if process.poll() is None:
+            print_status("Z-score calculator started (funding rate statistics)", "success")
+            print_status(f"Z-score calculator log: {log_file}", "info")
+            return True
+        else:
+            print_status("Z-score calculator failed to start", "warning")
+            return False
+
+    except Exception as e:
+        print_status(f"Failed to start Z-score calculator: {e}", "warning")
+        return False
+
 
 def start_background_historical_backfill():
     """Start 7-day historical backfill in background thread."""
@@ -399,14 +531,24 @@ def start_background_historical_backfill():
             
             try:
                 print_status("Starting 30-day historical data refresh in background...", "info")
-                
+
                 # Run the backfill script silently
-                result = subprocess.run(
-                    [sys.executable, "run_backfill.py", "--days", "30"],
-                    capture_output=True,
-                    text=True,
-                    cwd=Path.cwd()
-                )
+                backfill_script = Path("scripts/unified_historical_backfill.py")
+                if backfill_script.exists():
+                    result = subprocess.run(
+                        [sys.executable, str(backfill_script), "--days", "30"],
+                        capture_output=True,
+                        text=True,
+                        cwd=Path.cwd()
+                    )
+                else:
+                    # Fallback to old name if it exists
+                    result = subprocess.run(
+                        [sys.executable, "run_backfill.py", "--days", "30"],
+                        capture_output=True,
+                        text=True,
+                        cwd=Path.cwd()
+                    )
                 
                 if result.returncode == 0:
                     print_status("Background: 30-day historical data refresh completed", "success")
@@ -437,7 +579,7 @@ def open_dashboard():
     time.sleep(2)
     webbrowser.open("http://localhost:3000")
 
-def print_summary(collector_running=True):
+def print_summary(collector_running=True, spread_collector_running=False, zscore_running=False):
     """Print summary of running services."""
     print("\n" + "="*60, flush=True)
     print(f"{Colors.BOLD}DASHBOARD READY!{Colors.RESET}", flush=True)
@@ -457,10 +599,14 @@ def print_summary(collector_running=True):
     else:
         print(f"  Real-time collector: {Colors.YELLOW}Not running - start manually with:{Colors.RESET}", flush=True)
         print(f"    python main.py --loop --interval 30", flush=True)
-    print(f"  Historical refresh: 30-day backfill running", flush=True)
+    if spread_collector_running:
+        print(f"  Spread collector: Continuously updating arbitrage spreads", flush=True)
+    if zscore_running:
+        print(f"  Z-score calculator: Computing funding rate statistics", flush=True)
+    print(f"  Historical data: 30-day spreads populated", flush=True)
     print(f"\n{Colors.BLUE}Data updates:{Colors.RESET}", flush=True)
     print(f"  Dashboard auto-refreshes every 30 seconds", flush=True)
-    print(f"  Historical data updating in background (~5-7 min)", flush=True)
+    print(f"  Z-scores tracking funding rate deviations", flush=True)
     print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}", flush=True)
     sys.stdout.flush()
 
@@ -514,19 +660,39 @@ def main():
     
     # Step 6: Start data collector (optional, don't fail if it doesn't work)
     collector_started = start_data_collector(quiet=True)
-    
+
     print()  # Empty line for spacing
-    
-    # Step 7: Start background historical backfill
+
+    # Step 7: Backfill historical arbitrage spreads 
+    backfill_arbitrage_spreads()
+
+    print()  # Empty line for spacing
+
+
+    # Step 9: Start spread collector for ongoing updates
+    spread_collector_started = start_spread_collector()
+
+    print()  # Empty line for spacing
+
+    # Step 10: Start Z-score calculator for funding statistics
+    zscore_started = start_zscore_calculator()
+
+    print()  # Empty line for spacing
+
+    # Step 11: Start background historical backfill
     backfill_thread = start_background_historical_backfill()
-    
+
     print()  # Empty line for spacing
-    
-    # Step 8: Open browser
+
+    # Step 12: Open browser
     open_dashboard()
-    
-    # Step 9: Show summary
-    print_summary(collector_running=collector_started)
+
+    # Step 13: Show summary
+    print_summary(
+        collector_running=collector_started,
+        spread_collector_running=spread_collector_started,
+        zscore_running=zscore_started
+    )
     
     # Keep running until Ctrl+C
     try:

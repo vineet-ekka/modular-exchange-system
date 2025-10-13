@@ -10,10 +10,14 @@ Configure the order and timing of exchange data collection.
 EXCHANGE_SCHEDULE = [
     ("binance", 0),       # Starts immediately
     ("kucoin", 30),       # Starts 30s after collection begins
+    ("bybit", 90),        # Starts 90s after collection begins (696 contracts)
     ("backpack", 120),    # Starts 120s after collection begins
     ("hyperliquid", 180), # Starts 180s after collection begins (1-hour funding)
-    ("kraken", 210),      # Would start 210s after collection begins (when enabled)
-    ("deribit", 240),     # Would start 240s after collection begins (when enabled)
+    ("aster", 210),       # Starts 210s after collection begins
+    ("drift", 240),       # Starts 240s after collection begins (Solana DEX, 1-hour funding)
+    ("lighter", 265),     # Starts 265s after collection begins (blockchain DEX)
+    ("kraken", 270),      # Would start 270s after collection begins (when enabled)
+    ("deribit", 300),     # Would start 300s after collection begins (when enabled)
 ]
 
 # Alternative schedules for different scenarios
@@ -25,30 +29,42 @@ SCHEDULES = {
     "fast": [
         ("binance", 0),
         ("kucoin", 10),
+        ("bybit", 15),
         ("backpack", 20),
         ("hyperliquid", 30),
-        ("kraken", 40),
-        ("deribit", 50),
+        ("aster", 35),
+        ("drift", 40),
+        ("lighter", 45),
+        ("kraken", 50),
+        ("deribit", 60),
     ],
     
     # Conservative: Longer delays to minimize API load
     "conservative": [
         ("binance", 0),
         ("kucoin", 60),
+        ("bybit", 120),
         ("backpack", 180),
         ("hyperliquid", 240),
-        ("kraken", 300),
-        ("deribit", 360),
+        ("aster", 270),
+        ("drift", 300),
+        ("lighter", 330),
+        ("kraken", 360),
+        ("deribit", 420),
     ],
     
     # Priority: Collect most important exchanges first with minimal delay
     "priority": [
         ("binance", 0),     # Highest volume
         ("kucoin", 5),      # Second highest
+        ("bybit", 8),       # Third highest (696 contracts)
         ("hyperliquid", 10), # DEX with hourly funding
-        ("backpack", 45),   # Lower priority
-        ("kraken", 50),     # Lower priority
-        ("deribit", 55),    # Lower priority
+        ("aster", 12),      # DEX
+        ("drift", 15),      # Solana DEX with hourly funding
+        ("lighter", 18),    # Blockchain DEX
+        ("backpack", 50),   # Lower priority
+        ("kraken", 55),     # Lower priority
+        ("deribit", 60),    # Lower priority
     ],
 }
 

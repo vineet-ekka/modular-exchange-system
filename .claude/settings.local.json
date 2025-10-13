@@ -58,8 +58,18 @@
       "WebFetch(domain:docs.backpack.exchange)",
       "Bash(cat:*)",
       "Bash(git pull:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "WebFetch(domain:drift-labs.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.lighter.xyz)",
+      "WebFetch(domain:app.lighter.xyz)",
+      "WebFetch(domain:www.okx.com)",
+      "WebFetch(domain:bybit-exchange.github.io)",
+      "Read(//c/Users/vinee/.claude/**)"
     ],
     "deny": []
-  }
+  },
+  "outputStyle": "Explanatory"
 }

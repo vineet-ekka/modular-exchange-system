@@ -23,6 +23,7 @@ from exchanges.binance_exchange import BinanceExchange
 from exchanges.kucoin_exchange import KuCoinExchange
 from exchanges.hyperliquid_exchange import HyperliquidExchange
 from exchanges.backpack_exchange import BackpackExchange
+from exchanges.aster_exchange import AsterExchange
 from database.postgres_manager import PostgresManager
 
 # Configure logging
@@ -47,7 +48,8 @@ class RecentGapFiller:
             'Binance': BinanceExchange(),
             'KuCoin': KuCoinExchange(),
             'Hyperliquid': HyperliquidExchange(),
-            'Backpack': BackpackExchange()
+            'Backpack': BackpackExchange(),
+            'Aster': AsterExchange()
         }
         
     def identify_gaps(self, min_gap_hours: float = 6) -> Dict[str, List[str]]:

@@ -29,6 +29,7 @@ from utils.health_check import print_health_status
 from utils.contract_metadata_manager import ContractMetadataManager
 from utils.backfill_completeness import BackfillCompletenessValidator
 from utils.zscore_calculator import ZScoreCalculator
+from utils.redis_cache import RedisCache
 
 
 class ExchangeDataSystem:
@@ -53,6 +54,10 @@ class ExchangeDataSystem:
         self.last_completeness_check = None
         self.data_processor = None
         self.unified_data = None
+
+        # Initialize Redis cache for invalidation
+        self.cache = RedisCache()
+        self.cache_invalidation_enabled = True  # Can be disabled if needed
         
         # Loop control
         self.running = False
@@ -88,17 +93,20 @@ class ExchangeDataSystem:
             
             # Step 4: Upload to database
             self._upload_to_database()
-            
+
             # Step 5: Calculate and update Z-scores
             self._update_zscore_statistics()
-            
-            # Step 6: Sync contract metadata (NEW)
+
+            # Step 6: Invalidate cache after database updates
+            self._invalidate_cache()
+
+            # Step 7: Sync contract metadata (NEW)
             self._sync_contract_metadata()
 
-            # Step 7: Cleanup stale data from inactive contracts
+            # Step 8: Cleanup stale data from inactive contracts
             self._cleanup_stale_data()
 
-            # Step 8: Check data completeness (hourly)
+            # Step 9: Check data completeness (hourly)
             self._check_data_completeness()
             
             print("\n" + "="*60)
@@ -180,11 +188,11 @@ class ExchangeDataSystem:
             result = zscore_calc.process_all_contracts()
             
             if result:
-                print(f"✓ Z-scores updated for {result.get('contracts_updated', 0)} contracts")
+                print(f"[OK] Z-scores updated for {result.get('contracts_updated', 0)} contracts")
                 if result.get('extreme_values', 0) > 0:
                     print(f"  ! {result.get('extreme_values', 0)} contracts with |Z| > 2.0")
             else:
-                print("✓ Z-scores calculation completed")
+                print("[OK] Z-scores calculation completed")
                 
         except Exception as e:
             self.logger.error(f"Z-score calculation failed: {e}")
@@ -192,7 +200,7 @@ class ExchangeDataSystem:
     
     def _sync_contract_metadata(self):
         """Synchronize contract metadata table with current data."""
-        print("\n6. Syncing contract metadata...")
+        print("\n7. Syncing contract metadata...")
         
         try:
             sync_stats = self.metadata_manager.sync_with_exchange_data()
@@ -223,7 +231,7 @@ class ExchangeDataSystem:
         if not AUTO_CLEANUP_DELISTED:
             return  # Skip if cleanup is disabled
 
-        print("\n7. Cleaning up stale data...")
+        print("\n8. Cleaning up stale data...")
 
         try:
             # Get configuration from settings
@@ -302,7 +310,7 @@ class ExchangeDataSystem:
             if time_since_last_check < 3600:  # Less than 1 hour
                 return
         
-        print("\n6. Checking data completeness...")
+        print("\n9. Checking data completeness...")
         
         try:
             # Quick validation for current contracts
@@ -383,7 +391,28 @@ class ExchangeDataSystem:
         if self.data_processor:
             return self.data_processor.get_top_funding_rates(limit)
         return None
-    
+
+    def _invalidate_cache(self):
+        """
+        Invalidate Redis cache after database updates to ensure fresh data.
+        This forces API endpoints to fetch new data on the next request.
+        """
+        if not self.cache_invalidation_enabled:
+            return
+
+        try:
+            # Check if Redis is available
+            if self.cache.is_available():
+                # Clear all cached data
+                self.cache.clear()
+                self.logger.info("Cache invalidated after database update")
+                print("OK Cache invalidated to ensure fresh data")
+            else:
+                self.logger.debug("Redis not available, using in-memory cache")
+        except Exception as e:
+            self.logger.warning(f"Cache invalidation failed: {e}")
+            # Non-critical error, continue execution
+
     def run_loop(self, interval: int = 300, duration: int = None, quiet: bool = False):
         """
         Run the system in a continuous loop.

@@ -111,7 +111,14 @@ function ModernTable<T extends Record<string, any>>({
                 style={{ width: column.width }}
                 onClick={() => handleSort(column)}
               >
-                <div className="flex items-center gap-1">
+                <div className={clsx(
+                  "flex items-center gap-1",
+                  {
+                    'justify-start': column.align === 'left' || !column.align,
+                    'justify-center': column.align === 'center',
+                    'justify-end': column.align === 'right',
+                  }
+                )}>
                   <span>{column.header}</span>
                   {column.sortable && (
                     <span className="inline-block ml-1">
@@ -145,8 +152,8 @@ function ModernTable<T extends Record<string, any>>({
                 'transition-colors duration-150',
                 {
                   'bg-gray-50': striped && rowIndex % 2 === 1,
-                  'hover:bg-gray-50': hover,
-                  'cursor-pointer': onRowClick,
+                  'hover:bg-gray-50': hover && !onRowClick,
+                  'cursor-pointer hover:bg-blue-50': onRowClick,
                   'bg-primary-50 hover:bg-primary-100': selectedRows.includes(rowIndex),
                 }
               )}

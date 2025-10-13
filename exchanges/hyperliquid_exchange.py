@@ -45,18 +45,14 @@ class HyperliquidExchange(BaseExchange):
             payload = {"type": "metaAndAssetCtxs"}
             
             # Make POST request to get all contract data
-            response = requests.post(
+            data = self.safe_post_request(
                 self.base_url,
-                json=payload,
-                timeout=10,
-                headers={'Content-Type': 'application/json'}
+                json_data=payload
             )
-            
-            if response.status_code != 200:
-                self.logger.error(f"API request failed with status {response.status_code}")
+
+            if not data:
+                self.logger.error("Failed to fetch contract data from Hyperliquid API")
                 return pd.DataFrame()
-            
-            data = response.json()
             
             if not data or len(data) < 2:
                 self.logger.error("Invalid response structure from Hyperliquid API")
@@ -196,49 +192,75 @@ class HyperliquidExchange(BaseExchange):
             self.logger.error(f"Error normalizing Hyperliquid data: {e}")
             return pd.DataFrame(columns=self.get_unified_columns())
     
-    def fetch_historical_funding_rates(self, coin: str, days: int = 30) -> pd.DataFrame:
+    def fetch_historical_funding_rates(self, coin: str, days: int = 30,
+                                      start_time: Optional[datetime] = None,
+                                      end_time: Optional[datetime] = None) -> pd.DataFrame:
         """
         Fetch historical funding rates for a specific coin from Hyperliquid.
-        
+
         Args:
             coin: Asset name (e.g., 'BTC', 'ETH')
-            days: Number of days of history to fetch
-            
+            days: Number of days of history to fetch (ignored if start_time/end_time provided)
+            start_time: Optional start datetime (UTC)
+            end_time: Optional end datetime (UTC)
+
         Returns:
             DataFrame with historical funding rates
         """
         try:
-            # Calculate start time in milliseconds
-            end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-            start_time = end_time - (days * 24 * 60 * 60 * 1000)
-            
-            # Prepare request for funding history
-            payload = {
-                "type": "fundingHistory",
-                "coin": coin,
-                "startTime": start_time
-            }
-            
-            # Make POST request
-            response = requests.post(
-                self.base_url,
-                json=payload,
-                timeout=10,
-                headers={'Content-Type': 'application/json'}
-            )
-            
-            if response.status_code != 200:
-                self.logger.warning(f"Failed to fetch history for {coin}: {response.status_code}")
+            # Calculate time range
+            if end_time is None:
+                end_time = datetime.now(timezone.utc)
+            if start_time is None:
+                start_time = end_time - timedelta(days=days)
+
+            # Split into 15-day chunks to avoid 500-record limit
+            # Hyperliquid API returns max 500 records per request
+            # 15 days * 24 hours = 360 records, safely under the limit
+            chunk_days = 15
+            all_data = []
+            current_start = start_time
+
+            while current_start < end_time:
+                # Calculate chunk end time
+                chunk_end = min(current_start + timedelta(days=chunk_days), end_time)
+
+                # Convert to milliseconds for API
+                chunk_start_ms = int(current_start.timestamp() * 1000)
+                chunk_end_ms = int(chunk_end.timestamp() * 1000)
+
+                # Prepare request for funding history
+                payload = {
+                    "type": "fundingHistory",
+                    "coin": coin,
+                    "startTime": chunk_start_ms,
+                    "endTime": chunk_end_ms
+                }
+
+                # Make POST request with rate limiting and retry logic
+                chunk_data = self.safe_post_request(
+                    self.base_url,
+                    json_data=payload,
+                    silent_errors=True  # Don't spam errors for individual coins
+                )
+
+                if chunk_data:
+                    all_data.extend(chunk_data)
+                    self.logger.debug(f"Fetched {len(chunk_data)} records for {coin} "
+                                    f"({current_start.date()} to {chunk_end.date()})")
+
+                # Move to next chunk
+                current_start = chunk_end
+
+            if not all_data:
+                self.logger.warning(f"No historical data fetched for {coin}")
                 return pd.DataFrame()
-            
-            data = response.json()
-            
-            if not data:
-                self.logger.warning(f"No historical data for {coin}")
-                return pd.DataFrame()
-            
-            # Create DataFrame
-            df = pd.DataFrame(data)
+
+            # Create DataFrame from combined data
+            df = pd.DataFrame(all_data)
+
+            # Remove duplicates based on time (in case of overlapping chunks)
+            df = df.drop_duplicates(subset=['time'], keep='first')
             
             # Convert timestamps from milliseconds to datetime
             df['funding_time'] = pd.to_datetime(df['time'], unit='ms', utc=True)
@@ -326,8 +348,8 @@ class HyperliquidExchange(BaseExchange):
         # Process each asset
         for i, asset in enumerate(assets):
             try:
-                # Fetch historical data for this asset using actual days
-                hist_df = self.fetch_historical_funding_rates(asset, actual_days)
+                # Fetch historical data for this asset using specified time range
+                hist_df = self.fetch_historical_funding_rates(asset, actual_days, start_time, end_time)
                 
                 if not hist_df.empty:
                     all_historical_data.append(hist_df)
@@ -338,8 +360,8 @@ class HyperliquidExchange(BaseExchange):
                     progress = ((i + 1) / len(assets)) * 100
                     progress_callback(i + 1, len(assets), progress, f"Processing {asset}")
                 
-                # Small delay to respect rate limits
-                time.sleep(0.5)
+                # Delay to respect rate limits (increased to avoid 429 errors)
+                time.sleep(1.0)
                 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for {asset}: {e}")
@@ -365,18 +387,14 @@ class HyperliquidExchange(BaseExchange):
         try:
             payload = {"type": "allMids"}
             
-            response = requests.post(
+            data = self.safe_post_request(
                 self.base_url,
-                json=payload,
-                timeout=10,
-                headers={'Content-Type': 'application/json'}
+                json_data=payload
             )
-            
-            if response.status_code != 200:
-                self.logger.warning(f"Failed to fetch mid prices: {response.status_code}")
+
+            if not data:
+                self.logger.warning("Failed to fetch mid prices")
                 return {}
-            
-            data = response.json()
             
             # Convert string prices to float
             prices = {}

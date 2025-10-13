@@ -35,6 +35,10 @@ EXCHANGES = {
     'binance': True,      # Enabled - 547 perpetual contracts
     'kucoin': True,       # Enabled - 477 perpetual contracts
     'hyperliquid': True,  # Enabled - 171 perpetual contracts
+    'drift': True,        # Enabled - 61 perpetual contracts (Solana DEX)
+    'aster': True,        # Enabled - Aster DEX perpetual contracts (OPTIMIZED)
+    'lighter': True,      # Enabled - Lighter blockchain perpetual contracts
+    'bybit': True,        # Enabled - 696 perpetual contracts (668 linear + 28 inverse)
     'deribit': False,     # Ready but disabled
     'kraken': False       # Ready but disabled
 }
@@ -116,7 +120,7 @@ HISTORICAL_MAX_RETRIES = 3
 
 # Synchronized historical window settings
 HISTORICAL_SYNC_ENABLED = True  # Use synchronized date ranges across exchanges
-HISTORICAL_ALIGN_TO_MIDNIGHT = True  # Align start/end times to midnight UTC
+HISTORICAL_ALIGN_TO_MIDNIGHT = True  # Align start time to midnight UTC (end time is always current time)
 HISTORICAL_WINDOW_DAYS = 30  # Default window size in days
 
 # Base backoff time in seconds for retries
@@ -147,6 +151,13 @@ FILTER_INACTIVE_CONTRACTS = True  # Hide inactive contracts in API endpoints
 
 # Maximum age of data to serve via API (in days)
 API_MAX_DATA_AGE_DAYS = 3         # Don't serve data older than this
+
+# =============================================================================
+# EXCHANGE-SPECIFIC FILTERING SETTINGS
+# =============================================================================
+# Drift: Minimum 24h trading volume threshold to consider contract active
+# Set to 0.0 to filter out all zero-volume contracts (recommended)
+DRIFT_MIN_VOLUME_THRESHOLD = 0.0  # Filters out zombie contracts with no trading activity
 
 # =============================================================================
 # CONFIGURATION VALIDATION

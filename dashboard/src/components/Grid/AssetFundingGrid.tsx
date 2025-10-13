@@ -1,7 +1,10 @@
-import React, { useState, useEffect, Fragment, useCallback } from 'react';
+import React, { useState, useEffect, Fragment, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { fetchContractsByAsset, ContractDetails } from '../../services/api';
+import { useExchangeFilter } from '../../hooks/useExchangeFilter';
+import { ExchangeFilterPanel } from './ExchangeFilter';
+import { AssetGridData as ImportedAssetGridData } from '../../types/exchangeFilter';
 
 interface ExchangeRate {
   funding_rate: number | null;
@@ -9,10 +12,8 @@ interface ExchangeRate {
   funding_interval_hours?: number | null;
 }
 
-interface AssetGridData {
-  asset: string;
-  exchanges: Record<string, ExchangeRate>;
-}
+type AssetGridData = ImportedAssetGridData;
+type ViewMode = 'apr' | '1h' | '8h' | '1d' | '7d';
 
 const AssetFundingGrid: React.FC = () => {
   const navigate = useNavigate();
@@ -27,6 +28,14 @@ const AssetFundingGrid: React.FC = () => {
   const [loadingContracts, setLoadingContracts] = useState<Set<string>>(new Set());
   const [autoExpandedAssets, setAutoExpandedAssets] = useState<Set<string>>(new Set());
   const [allContractsLoaded, setAllContractsLoaded] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('apr');
+
+  const {
+    filterState,
+    updateFilterState,
+    filteredData: filterFilteredData,
+    visibleExchanges,
+  } = useExchangeFilter(gridData, exchanges, searchTerm, contractsData);
 
   // Fetch grid data
   useEffect(() => {
@@ -39,19 +48,27 @@ const AssetFundingGrid: React.FC = () => {
         console.log('Fetched grid data:', result); // Debug log
         
         if (result.data && result.data.length > 0) {
-          setGridData(result.data);
-          console.log('Set grid data with', result.data.length, 'assets'); // Debug log
-          
+          // Normalize exchange keys to lowercase for consistency
+          const normalizedData = result.data.map((item: AssetGridData) => ({
+            ...item,
+            exchanges: Object.fromEntries(
+              Object.entries(item.exchanges).map(([key, value]) => [key.toLowerCase(), value])
+            )
+          }));
+
+          setGridData(normalizedData);
+          console.log('Set grid data with', normalizedData.length, 'assets');
+
           // Extract unique exchanges
           const uniqueExchanges = new Set<string>();
-          result.data.forEach((item: AssetGridData) => {
+          normalizedData.forEach((item: AssetGridData) => {
             Object.keys(item.exchanges).forEach(exchange => {
               uniqueExchanges.add(exchange);
             });
           });
           const exchangeList = Array.from(uniqueExchanges).sort();
           setExchanges(exchangeList);
-          console.log('Found exchanges:', exchangeList); // Debug log
+          console.log('Found exchanges:', exchangeList);
         } else {
           console.log('No data received from API');
         }
@@ -75,29 +92,29 @@ const AssetFundingGrid: React.FC = () => {
   // 2. User searches for specific contracts
   // This significantly reduces initial load time and API calls
 
-  // Smart fetching for search with debouncing
+  // Smart fetching for search with debouncing - simplified
   useEffect(() => {
     if (!searchTerm || searchTerm.length < 2) {
       return; // Don't fetch for very short searches
     }
 
     const fetchTimer = setTimeout(async () => {
-      // Only fetch contracts for assets that might match the search
       const searchLower = searchTerm.toLowerCase();
+
+      // Only fetch contracts for assets that match or might have matching contracts
       const assetsToFetch = gridData
         .filter(item => {
-          // Check if we need to fetch contracts for this asset
-          const assetMatches = item.asset.toLowerCase().includes(searchLower);
           const alreadyFetched = !!contractsData[item.asset];
-          
-          // Fetch if asset name matches and we haven't fetched yet
-          // Or if the search term might match a contract symbol
-          return !alreadyFetched && (assetMatches || 
-            searchLower.includes('usdt') || 
-            searchLower.includes('usd') ||
-            searchLower.includes('perp'));
+
+          // Only fetch if not already fetched and either:
+          // 1. Asset name matches the search
+          // 2. Search contains common contract suffixes (might be searching for contracts)
+          return !alreadyFetched && (
+            item.asset.toLowerCase().includes(searchLower) ||
+            searchLower.length > 3 // For longer searches, fetch to check contract names
+          );
         })
-        .slice(0, 20); // Limit to 20 assets at a time
+        .slice(0, 10); // Limit to 10 assets at a time for better performance
 
       // Fetch contracts for these assets
       for (const item of assetsToFetch) {
@@ -118,51 +135,18 @@ const AssetFundingGrid: React.FC = () => {
     return () => clearTimeout(fetchTimer);
   }, [searchTerm, gridData]);
 
-  // Filter data based on search - improved logic
-  const filteredData = gridData.filter(item => {
-    if (!searchTerm) return true; // Show all if no search term
+  const filteredData = filterFilteredData;
 
-    const searchLower = searchTerm.toLowerCase();
-
-    // Check if asset name matches
-    if (item.asset.toLowerCase().includes(searchLower)) {
-      return true;
-    }
-
-    // Check if any exchange name matches
-    const exchangeNames = Object.keys(item.exchanges);
-    if (exchangeNames.some(exchange => exchange.toLowerCase().includes(searchLower))) {
-      return true;
-    }
-
-    // Check common contract patterns (even without fetched data)
-    // Most contracts follow pattern: ASSET-USDT, ASSETUSDT, ASSET-PERP, etc.
-    const commonPatterns = [
-      `${item.asset.toLowerCase()}usdt`,
-      `${item.asset.toLowerCase()}-usdt`,
-      `${item.asset.toLowerCase()}usd`,
-      `${item.asset.toLowerCase()}-usd`,
-      `${item.asset.toLowerCase()}perp`,
-      `${item.asset.toLowerCase()}-perp`,
-      `${item.asset.toLowerCase()}_perp`
-    ];
-
-    if (commonPatterns.some(pattern => pattern.includes(searchLower))) {
-      return true;
-    }
-
-    // Finally, check actual contract data if available
-    const contracts = contractsData[item.asset] || [];
-    if (contracts.length > 0) {
-      const hasMatchingContract = contracts.some(contract =>
-        contract.symbol.toLowerCase().includes(searchLower) ||
-        contract.exchange.toLowerCase().includes(searchLower)
+  // Filter contracts by selected exchanges
+  const filteredContractsMap = useMemo(() => {
+    const result: Record<string, ContractDetails[]> = {};
+    Object.keys(contractsData).forEach(asset => {
+      result[asset] = contractsData[asset].filter(contract =>
+        filterState.selectedExchanges.has(contract.exchange.toLowerCase())
       );
-      if (hasMatchingContract) return true;
-    }
-
-    return false;
-  });
+    });
+    return result;
+  }, [contractsData, filterState.selectedExchanges]);
 
   // Auto-expand assets when their contracts match the search
   useEffect(() => {
@@ -171,26 +155,16 @@ const AssetFundingGrid: React.FC = () => {
       const searchLower = searchTerm.toLowerCase();
 
       filteredData.forEach(item => {
-        // Auto-expand if search term looks like a contract symbol
-        // but doesn't match the asset name directly
+        // Auto-expand if search doesn't match the asset name but matches a contract
         if (!item.asset.toLowerCase().includes(searchLower)) {
-          // Check if this might be a contract search
-          if (searchLower.includes('usdt') ||
-              searchLower.includes('usd') ||
-              searchLower.includes('perp') ||
-              searchLower.includes('-') ||
-              searchLower.includes('_')) {
+          const contracts = contractsData[item.asset] || [];
+          if (contracts.length > 0) {
+            const hasMatchingContract = contracts.some(contract =>
+              contract.symbol.toLowerCase().includes(searchLower)
+            );
 
-            // Check if we have contract data for this asset
-            const contracts = contractsData[item.asset] || [];
-            if (contracts.length > 0) {
-              const hasMatchingContract = contracts.some(contract =>
-                contract.symbol.toLowerCase().includes(searchLower)
-              );
-
-              if (hasMatchingContract) {
-                assetsToExpand.add(item.asset);
-              }
+            if (hasMatchingContract) {
+              assetsToExpand.add(item.asset);
             }
           }
         }
@@ -268,9 +242,59 @@ const AssetFundingGrid: React.FC = () => {
     }
   };
 
+  // Calculate projected funding based on current rate and timeframe
+  const calculateProjectedFunding = (
+    fundingRate: number,
+    fundingIntervalHours: number,
+    targetTimeframe: '1h' | '8h' | '1d' | '7d'
+  ): number => {
+    const timeframeHours: Record<string, number> = {
+      '1h': 1,
+      '8h': 8,
+      '1d': 24,
+      '7d': 168
+    };
+
+    const hours = timeframeHours[targetTimeframe];
+    const periodsInTimeframe = hours / fundingIntervalHours;
+    return fundingRate * periodsInTimeframe;
+  };
+
+  // Get the value to display based on viewMode
+  const getDisplayValue = (asset: string, exchange: string): number | null => {
+    const assetData = gridData.find(item => item.asset === asset);
+    const exchangeData = assetData?.exchanges[exchange];
+
+    if (!exchangeData) return null;
+
+    if (viewMode === 'apr') {
+      // Show APR from gridData
+      return exchangeData.apr ?? null;
+    } else {
+      // Calculate projected funding from current rate
+      const fundingRate = exchangeData.funding_rate;
+      const fundingInterval = exchangeData.funding_interval_hours ?? 8;
+
+      if (fundingRate === null || fundingRate === undefined) return null;
+
+      return calculateProjectedFunding(fundingRate, fundingInterval, viewMode);
+    }
+  };
+
   const formatRate = (rate: number | null) => {
     if (rate === null || rate === undefined) return '-';
     return `${(rate * 100).toFixed(4)}%`;
+  };
+
+  const formatValue = (value: number | null) => {
+    if (value === null || value === undefined) return '-';
+    if (viewMode === 'apr') {
+      // APR is already percentage, display with 2 decimals
+      return `${value.toFixed(2)}%`;
+    } else {
+      // Cumulative funding: multiply by 100 for percentage display
+      return `${(value * 100).toFixed(4)}%`;
+    }
   };
 
   const formatInterval = (hours: number | null | undefined) => {
@@ -300,10 +324,22 @@ const AssetFundingGrid: React.FC = () => {
   const formatOpenInterest = (contract: ContractDetails) => {
     const oi = contract.open_interest;
     if (!oi) return '-';
-    
-    // For USDT/USDC contracts, show USD value (OI * mark price)
+
+    // KuCoin and Hyperliquid already return USD values from backend
+    const exchangesWithUsdOi = ['KuCoin', 'Hyperliquid'];
+
+    // For USDT/USDC contracts, show USD value
     if (contract.quote_asset === 'USDT' || contract.quote_asset === 'USDC') {
-      const usdValue = oi * (contract.mark_price || 0);
+      let usdValue;
+
+      if (exchangesWithUsdOi.includes(contract.exchange)) {
+        // Already in USD, don't multiply by mark price again
+        usdValue = oi;
+      } else {
+        // Convert contracts to USD (Binance and Backpack)
+        usdValue = oi * (contract.mark_price || 0);
+      }
+
       if (usdValue > 1000000000) {
         return `${(usdValue / 1000000000).toFixed(2)}B USD`;
       } else if (usdValue > 1000000) {
@@ -329,12 +365,12 @@ const AssetFundingGrid: React.FC = () => {
     return `${oi.toLocaleString()} ${baseAsset}`;
   };
 
-  // Format price with proper decimals
+  // Format price with proper decimals (5 decimal places for precision)
   const formatPrice = (price: number) => {
     if (!price) return '-';
-    return `$${price.toLocaleString('en-US', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
+    return `$${price.toLocaleString('en-US', {
+      minimumFractionDigits: 5,
+      maximumFractionDigits: 5
     })}`;
   };
 
@@ -355,14 +391,52 @@ const AssetFundingGrid: React.FC = () => {
   }
 
   return (
-    <div className="bg-white shadow-sm border-y border-light-border overflow-hidden">
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-light-border bg-light-bg-secondary">
+    <div>
+      <div className="px-6 mb-4">
+        <div className="max-w-xs">
+          <ExchangeFilterPanel
+            exchanges={exchanges}
+            selectedExchanges={filterState.selectedExchanges}
+            onExchangesChange={(selected) => updateFilterState({ selectedExchanges: selected })}
+            filterState={filterState}
+            onFilterStateChange={updateFilterState}
+          />
+        </div>
+      </div>
+
+      <div className="bg-white shadow-sm border-y border-light-border overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-light-border bg-light-bg-secondary">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-semibold text-text-primary">
-            Market Overview
+            Perp Funding Market Overview
           </h2>
           <div className="flex items-center space-x-4">
+            {/* View Mode Toggle */}
+            <div className="flex items-center space-x-1 bg-white border border-light-border rounded shadow-sm">
+              {[
+                { value: 'apr', label: 'APR' },
+                { value: '1h', label: '1H' },
+                { value: '8h', label: '8H' },
+                { value: '1d', label: '1D' },
+                { value: '7d', label: '7D' }
+              ].map((mode) => (
+                <button
+                  key={mode.value}
+                  onClick={() => setViewMode(mode.value as ViewMode)}
+                  className={clsx(
+                    'px-3 py-1 text-xs font-medium transition-colors',
+                    viewMode === mode.value
+                      ? 'bg-accent-blue text-white'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  )}
+                  title={`View ${mode.value === 'apr' ? 'Annualized Percentage Rate' : `Cumulative Funding (${mode.label})`}`}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
             <button
               onClick={() => window.location.reload()}
               className="px-3 py-1 bg-text-primary hover:bg-gray-800 text-white rounded text-sm transition-colors shadow-sm"
@@ -376,7 +450,7 @@ const AssetFundingGrid: React.FC = () => {
 
             <input
               type="text"
-              placeholder="Search assets or contracts..."
+              placeholder="Search assets or contract names..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="px-3 py-1.5 bg-white border border-light-border rounded text-sm text-text-primary focus:outline-none focus:border-accent-blue w-64"
@@ -390,13 +464,13 @@ const AssetFundingGrid: React.FC = () => {
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
-              <th 
+              <th
                 onClick={() => handleSort('asset')}
                 className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:bg-gray-100 sticky left-0 bg-gray-50 z-10"
               >
                 Asset {sortColumn === 'asset' && (sortDirection === 'asc' ? '↑' : '↓')}
               </th>
-              {exchanges.map(exchange => (
+              {visibleExchanges.map(exchange => (
                 <th
                   key={exchange}
                   onClick={() => handleSort(exchange)}
@@ -432,34 +506,40 @@ const AssetFundingGrid: React.FC = () => {
                       )}
                     </div>
                   </td>
-                  {exchanges.map(exchange => {
-                    const rate = item.exchanges[exchange]?.funding_rate ?? null;
+                  {visibleExchanges.map(exchange => {
+                    const displayValue = getDisplayValue(item.asset, exchange);
+                    const isMissing = displayValue === null || displayValue === undefined;
+                    const shouldHighlight = filterState.highlightMissing && isMissing;
 
                     return (
                       <td
                         key={exchange}
                         className={clsx(
                           'px-4 py-3 text-center whitespace-nowrap text-sm relative',
-                          getRateBgColor(rate)
+                          getRateBgColor(displayValue),
+                          shouldHighlight && 'bg-orange-50 border border-orange-200'
                         )}
                       >
-                        <span className={getRateColor(rate)}>
-                          {formatRate(rate)}
+                        <span className={getRateColor(displayValue)}>
+                          {formatValue(displayValue)}
                         </span>
+                        {shouldHighlight && (
+                          <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-orange-400 rounded-full" title="No data available"></div>
+                        )}
                       </td>
                     );
                   })}
                 </tr>
                 {(expandedAssets.has(item.asset) || autoExpandedAssets.has(item.asset)) && (
                   <tr className="expand-animation">
-                    <td colSpan={exchanges.length + 1} className="p-0">
+                    <td colSpan={visibleExchanges.length + 1} className="p-0">
                       <div className="bg-gray-50 border-t border-b border-gray-200">
                         {loadingContracts.has(item.asset) ? (
                           <div className="p-4 text-center">
                             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-blue mx-auto"></div>
                             <p className="text-sm text-gray-500 mt-2">Loading contracts...</p>
                           </div>
-                        ) : contractsData[item.asset] && contractsData[item.asset].length > 0 ? (
+                        ) : filteredContractsMap[item.asset] && filteredContractsMap[item.asset].length > 0 ? (
                           <div className="overflow-x-auto">
                             <table className="min-w-full text-xs">
                               <thead className="bg-gray-100">
@@ -471,7 +551,7 @@ const AssetFundingGrid: React.FC = () => {
                                   <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[60px]">Interval</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[100px]">Funding Rate</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">APR</th>
-                                  <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[120px]">Open Interest</th>
+                                  <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[120px]">Open Interest USD</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[100px]">Mark Price</th>
                                   <th className="px-3 py-2 text-right font-medium text-gray-700 min-w-[100px]">Index Price</th>
                                   <th className="px-3 py-2 text-center font-medium text-gray-700 min-w-[80px]">Z-Score</th>
@@ -482,13 +562,11 @@ const AssetFundingGrid: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-200">
-                                {contractsData[item.asset].map((contract, idx) => {
+                                {filteredContractsMap[item.asset].map((contract, idx) => {
                                   const searchLower = searchTerm.toLowerCase();
-                                  const isContractMatch = searchTerm && (
-                                    contract.symbol.toLowerCase().includes(searchLower) ||
-                                    contract.exchange.toLowerCase().includes(searchLower)
-                                  );
-                                  
+                                  const isContractMatch = searchTerm &&
+                                    contract.symbol.toLowerCase().includes(searchLower);
+
                                   return (
                                     <tr key={`${contract.exchange}-${contract.symbol}`} className={clsx(
                                         idx % 2 === 0 ? 'bg-white' : 'bg-gray-50',
@@ -498,10 +576,7 @@ const AssetFundingGrid: React.FC = () => {
                                         "px-3 py-2 font-medium",
                                         isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"
                                       )}>{contract.symbol}</td>
-                                      <td className={clsx(
-                                        "px-3 py-2",
-                                        isContractMatch && contract.exchange.toLowerCase().includes(searchLower) ? "text-blue-700 font-semibold" : "text-gray-700"
-                                      )}>{contract.exchange}</td>
+                                      <td className="px-3 py-2 text-gray-700">{contract.exchange}</td>
                                       <td className="px-3 py-2 text-gray-700">{contract.base_asset}</td>
                                       <td className="px-3 py-2 text-gray-700">{contract.quote_asset}</td>
                                       <td className="px-3 py-2 text-center font-medium text-gray-700">
@@ -585,7 +660,10 @@ const AssetFundingGrid: React.FC = () => {
                           </div>
                         ) : (
                           <div className="p-4 text-center text-gray-500">
-                            No contracts found for {item.asset}
+                            {contractsData[item.asset] && contractsData[item.asset].length > 0
+                              ? `No contracts match selected exchanges for ${item.asset}`
+                              : `No contracts found for ${item.asset}`
+                            }
                           </div>
                         )}
                       </div>
@@ -596,19 +674,28 @@ const AssetFundingGrid: React.FC = () => {
             ))}
           </tbody>
         </table>
-      </div>
 
-      {/* Legend */}
-      <div className="px-6 py-3 border-t border-light-border bg-light-bg-secondary flex items-center justify-between text-xs">
-        <div className="flex items-center space-x-4">
-          <span className="text-text-secondary font-medium">Funding:</span>
-          <span className="text-funding-positive">● Positive (Long pays Short)</span>
-          <span className="text-funding-negative">● Negative (Short pays Long)</span>
-          <span className="text-funding-neutral">● No Data</span>
+        {/* Legend */}
+        <div className="px-6 py-3 border-t border-light-border bg-light-bg-secondary flex items-center justify-between text-xs">
+          <div className="flex items-center space-x-4">
+            <span className="text-text-secondary font-medium">
+              {viewMode === 'apr'
+                ? 'APR (Annualized):'
+                : `Projected Funding (${viewMode.toUpperCase()}):`
+              }
+            </span>
+            <span className="text-funding-positive">● Positive (Long pays Short)</span>
+            <span className="text-funding-negative">● Negative (Short pays Long)</span>
+            <span className="text-funding-neutral">● No Data</span>
+          </div>
+          <div className="text-text-muted">
+            {viewMode === 'apr'
+              ? 'Click arrow to expand contracts'
+              : `Projected funding over ${viewMode === '1h' ? '1 hour' : viewMode === '8h' ? '8 hours' : viewMode === '1d' ? '1 day' : '1 week'} at current rate • Click arrow to expand contracts`
+            }
+          </div>
         </div>
-        <div className="text-text-muted">
-          Click arrow to expand contracts
-        </div>
+      </div>
       </div>
     </div>
   );

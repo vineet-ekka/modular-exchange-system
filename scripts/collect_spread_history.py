@@ -39,7 +39,7 @@ def get_db_connection():
 
 
 def collect_spreads():
-    """Collect and record current spreads."""
+    """Collect and record current spreads with Sharpe calculations."""
     try:
         # Fetch current funding data from API
         response = requests.get('http://localhost:8000/api/funding-rates-grid', timeout=30)
@@ -81,6 +81,7 @@ def collect_spreads():
 
         logger.info(f"Recorded {count} spreads at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
+
         # Close connection
         conn.close()
 
@@ -95,23 +96,24 @@ def collect_spreads():
 
 
 def refresh_materialized_view():
-    """Refresh the materialized view for statistics."""
+    """Refresh the materialized views for statistics."""
     try:
         conn = get_db_connection()
         spread_stats = ArbitrageSpreadStatistics(conn)
 
+        # Refresh spread statistics view
         success = spread_stats.refresh_statistics_view()
 
         if success:
-            logger.info("Successfully refreshed materialized view")
+            logger.info("Successfully refreshed spread statistics view")
         else:
-            logger.warning("Failed to refresh materialized view")
+            logger.warning("Failed to refresh spread statistics view")
 
         conn.close()
         return success
 
     except Exception as e:
-        logger.error(f"Error refreshing materialized view: {e}")
+        logger.error(f"Error refreshing materialized views: {e}")
         return False
 
 

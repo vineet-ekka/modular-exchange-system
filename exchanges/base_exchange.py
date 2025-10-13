@@ -115,22 +115,29 @@ class BaseExchange(ABC):
     def safe_request(self, url: str, params: Dict = None, delay: float = 0.1, silent_errors: bool = False) -> Optional[Dict]:
         """
         Make a safe HTTP request with error handling and rate limiting.
-        
+
         Args:
             url: The URL to request
             params: Query parameters
             delay: Delay before request (for rate limiting)
             silent_errors: If True, don't print error messages for 400/404 errors
-            
+
         Returns:
             JSON response data or None if failed
         """
         try:
             # Use the new rate limiter instead of simple sleep
             rate_limiter.acquire(self.name)
-            
-            response = requests.get(url, params=params, timeout=10)
-            
+
+            # Add cache-busting headers to ensure fresh data
+            headers = {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'User-Agent': f'ModularExchangeSystem/{self.name}'
+            }
+
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+
             # Handle different response codes
             if response.status_code == 200:
                 return response.json()
@@ -149,7 +156,7 @@ class BaseExchange(ABC):
             else:
                 response.raise_for_status()
                 return response.json()
-            
+
         except requests.exceptions.RequestException as e:
             if not silent_errors:
                 print(f"! Request failed for {url}: {str(e)}")
@@ -158,6 +165,87 @@ class BaseExchange(ABC):
             if not silent_errors:
                 print(f"! Unexpected error for {url}: {str(e)}")
             return None
+
+    def safe_post_request(self, url: str, json_data: Dict = None, headers: Dict = None,
+                         silent_errors: bool = False, max_retries: int = 3) -> Optional[Dict]:
+        """
+        Make a safe HTTP POST request with error handling, rate limiting, and retry logic.
+
+        Args:
+            url: The URL to request
+            json_data: JSON payload for POST request
+            headers: Optional headers (Content-Type will be set automatically for JSON)
+            silent_errors: If True, don't print error messages for 400/404 errors
+            max_retries: Maximum number of retries for 429 errors
+
+        Returns:
+            JSON response data or None if failed
+        """
+        if headers is None:
+            headers = {}
+        if json_data is not None:
+            headers['Content-Type'] = 'application/json'
+
+        # Add cache-busting headers to ensure fresh data
+        headers.update({
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'User-Agent': f'ModularExchangeSystem/{self.name}'
+        })
+
+        retry_count = 0
+        backoff_delay = 2  # Start with 2 second backoff
+
+        while retry_count <= max_retries:
+            try:
+                # Use the rate limiter
+                rate_limiter.acquire(self.name)
+
+                response = requests.post(url, json=json_data, headers=headers, timeout=10)
+
+                # Handle different response codes
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 429:
+                    # Rate limit hit - handle with retry logic
+                    retry_after = response.headers.get('Retry-After')
+                    if retry_after:
+                        wait_time = float(retry_after)
+                    else:
+                        wait_time = backoff_delay * (2 ** retry_count)  # Exponential backoff
+
+                    if retry_count < max_retries:
+                        if not silent_errors:
+                            print(f"! Rate limited on {url}, retrying in {wait_time}s (attempt {retry_count + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        rate_limiter.handle_429(self.name, wait_time)
+                        retry_count += 1
+                        continue
+                    else:
+                        if not silent_errors:
+                            print(f"! Max retries exceeded for {url}: 429 Too Many Requests")
+                        return None
+                elif response.status_code in [400, 404] and silent_errors:
+                    # Common for API endpoints that don't support certain symbols
+                    return None
+                elif response.status_code in [400, 404]:
+                    if not silent_errors:
+                        print(f"! POST request failed for {url}: {response.status_code} {response.reason}")
+                    return None
+                else:
+                    response.raise_for_status()
+                    return response.json()
+
+            except requests.exceptions.RequestException as e:
+                if not silent_errors:
+                    print(f"! POST request failed for {url}: {str(e)}")
+                return None
+            except Exception as e:
+                if not silent_errors:
+                    print(f"! Unexpected error for {url}: {str(e)}")
+                return None
+
+        return None
     
     def convert_timestamp(self, timestamp, unit='ms'):
         """

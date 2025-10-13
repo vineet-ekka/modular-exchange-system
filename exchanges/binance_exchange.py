@@ -226,25 +226,30 @@ class BinanceExchange(BaseExchange):
     async def _async_fetch_open_interest(self, base_url: str, symbols: List[str]) -> List[Dict]:
         """
         Async method to fetch open interest data with proper rate limiting.
-        
+
         Args:
             base_url: Binance API base URL
             symbols: List of symbols to fetch
-            
+
         Returns:
             List of successful open interest responses
         """
         # Rate limit: Binance allows 2400 requests/minute = 40 requests/second
-        # We'll be conservative and do 20 requests/second with batching
-        max_concurrent = 20
+        # Increase concurrent requests from 20 to 35 for better performance
+        max_concurrent = 35
         results = []
-        
+
         # Create semaphore to limit concurrent requests
         semaphore = asyncio.Semaphore(max_concurrent)
-        
+
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=10),
-            connector=aiohttp.TCPConnector(limit=100, limit_per_host=50)
+            connector=aiohttp.TCPConnector(
+                limit=200,
+                limit_per_host=100,
+                ttl_dns_cache=300,
+                keepalive_timeout=30
+            )
         ) as session:
             
             tasks = []
@@ -368,7 +373,7 @@ class BinanceExchange(BaseExchange):
             'funding_interval_hours': pd.to_numeric(df['fundingIntervalHours'], errors='coerce'),
             'index_price': pd.to_numeric(df['indexPrice'], errors='coerce'),
             'mark_price': pd.to_numeric(df['markPrice'], errors='coerce'),
-            'open_interest': pd.to_numeric(df['openInterest'], errors='coerce') if 'openInterest' in df.columns else None,
+            'open_interest': pd.to_numeric(df['openInterest'], errors='coerce') if 'openInterest' in df.columns else 0,
             'contract_type': df['contractType'],
             'market_type': ['Binance ' + mt if mt else 'Binance' for mt in df['binance_market_type']] if 'binance_market_type' in df.columns else 'Binance',
         })
