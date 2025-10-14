@@ -21,6 +21,8 @@ from .drift_exchange import DriftExchange
 from .aster_exchange import AsterExchange
 from .lighter_exchange import LighterExchange
 from .bybit_exchange import ByBitExchange
+from .pacifica_exchange import PacificaExchange
+from .paradex_exchange import ParadexExchange
 # from .deribit_exchange import DeribitExchange  # Not implemented yet
 # from .kraken_exchange import KrakenExchange  # Not implemented yet
 
@@ -86,6 +88,8 @@ class ExchangeFactory:
             'aster': AsterExchange,
             'lighter': LighterExchange,
             'bybit': ByBitExchange,
+            'pacifica': PacificaExchange,
+            'paradex': ParadexExchange,
             # 'deribit': DeribitExchange,  # Not implemented yet
             # 'kraken': KrakenExchange,  # Not implemented yet
             # Add new exchanges here as they become available

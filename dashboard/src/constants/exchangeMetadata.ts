@@ -65,6 +65,22 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
     funding_intervals: 'variable',
     orderPriority: 8
   },
+  pacifica: {
+    type: 'DEX',
+    category: 'Emerging',
+    contracts: 25,
+    color: '#10B981',
+    funding_intervals: [1],
+    orderPriority: 9
+  },
+  paradex: {
+    type: 'DEX',
+    category: 'Emerging',
+    contracts: 121,
+    color: '#8B5CF6',
+    funding_intervals: [1, 2, 4, 8],
+    orderPriority: 10
+  },
   deribit: {
     type: 'CEX',
     category: 'Options',
