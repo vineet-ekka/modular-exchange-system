@@ -4,7 +4,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   binance: {
     type: 'CEX',
     category: 'Major',
-    contracts: 547,
+    contracts: 592,
     color: '#F3BA2F',
     funding_intervals: [1, 4, 8],
     orderPriority: 1
@@ -12,7 +12,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   bybit: {
     type: 'CEX',
     category: 'Major',
-    contracts: 696,
+    contracts: 667,
     color: '#F7A600',
     funding_intervals: [1, 2, 4, 8],
     orderPriority: 2
@@ -20,7 +20,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   kucoin: {
     type: 'CEX',
     category: 'Major',
-    contracts: 477,
+    contracts: 522,
     color: '#24AE8F',
     funding_intervals: [1, 2, 4, 8],
     orderPriority: 3
@@ -28,7 +28,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   backpack: {
     type: 'CEX',
     category: 'Emerging',
-    contracts: 43,
+    contracts: 63,
     color: '#E8421D',
     funding_intervals: [1],
     orderPriority: 4
@@ -36,7 +36,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   hyperliquid: {
     type: 'DEX',
     category: 'Major',
-    contracts: 173,
+    contracts: 182,
     color: '#00D4FF',
     funding_intervals: [1],
     orderPriority: 5
@@ -44,7 +44,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   aster: {
     type: 'DEX',
     category: 'Emerging',
-    contracts: 102,
+    contracts: 123,
     color: '#9F7AEA',
     funding_intervals: [4],
     orderPriority: 6
@@ -52,7 +52,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   drift: {
     type: 'DEX',
     category: 'Emerging',
-    contracts: 61,
+    contracts: 51,
     color: '#A78BFA',
     funding_intervals: [1],
     orderPriority: 7
@@ -60,7 +60,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   lighter: {
     type: 'DEX',
     category: 'Emerging',
-    contracts: 330,
+    contracts: 91,
     color: '#818CF8',
     funding_intervals: 'variable',
     orderPriority: 8
@@ -76,7 +76,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   paradex: {
     type: 'DEX',
     category: 'Emerging',
-    contracts: 121,
+    contracts: 122,
     color: '#8B5CF6',
     funding_intervals: [1, 2, 4, 8],
     orderPriority: 10
@@ -84,11 +84,42 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
   deribit: {
     type: 'CEX',
     category: 'Options',
-    contracts: 0,
+    contracts: 20,
     color: '#3B3B3B',
     funding_intervals: [8],
-    orderPriority: 99,
-    disabled: true
+    orderPriority: 11
+  },
+  orderly: {
+    type: 'DEX',
+    category: 'Major',
+    contracts: 139,
+    color: '#00D4AA',
+    funding_intervals: [8],
+    orderPriority: 12
+  },
+  hibachi: {
+    type: 'DEX',
+    category: 'Emerging',
+    contracts: 20,
+    color: '#FF6B6B',
+    funding_intervals: [8],
+    orderPriority: 13
+  },
+  mexc: {
+    type: 'CEX',
+    category: 'Major',
+    contracts: 826,
+    color: '#00D4FF',
+    funding_intervals: [8],
+    orderPriority: 14
+  },
+  dydx: {
+    type: 'DEX',
+    category: 'Major',
+    contracts: 199,
+    color: '#6B46C1',
+    funding_intervals: [8],
+    orderPriority: 15
   },
   kraken: {
     type: 'CEX',

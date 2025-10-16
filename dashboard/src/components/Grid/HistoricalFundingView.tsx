@@ -119,7 +119,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
     setError(null);
     try {
       // First, fetch ALL available contracts for this asset
-      const contractsResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=100`);
+      const contractsResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=2000`);
       
       if (contractsResponse.ok) {
         const contractsData = await contractsResponse.json();

@@ -41,7 +41,13 @@ EXCHANGES = {
     'bybit': True,        # Enabled - 696 perpetual contracts (668 linear + 28 inverse)
     'pacifica': True,     # Enabled - Pacifica Finance perpetual contracts
     'paradex': True,      # Enabled - Paradex perpetual contracts (Starknet DEX)
-    'deribit': False,     # Ready but disabled
+    'hibachi': True,      # Enabled - Hibachi DEX perpetual contracts
+    'orderly': True,      # Enabled - Orderly Network perpetual contracts
+    'deribit': True,      # Enabled - Deribit perpetual contracts
+    'mexc': True,         # Enabled - MEXC perpetual contracts
+    'dydx': True,         # Enabled - dYdX v4 perpetual contracts
+    'edgex': False,       # Disabled - EdgeX API not accessible
+    'apex': False,        # Disabled - ApeX API not accessible
     'kraken': False       # Ready but disabled
 }
 
