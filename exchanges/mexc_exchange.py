@@ -322,7 +322,7 @@ class MexcExchange(BaseExchange):
             # Basic mapping
             normalized_df['exchange'] = self.name
             normalized_df['symbol'] = df['symbol'].apply(normalize_mexc_symbol)
-            normalized_df['base_asset'] = df['base_asset']
+            normalized_df['base_asset'] = df['base_asset'].apply(normalize_mexc_symbol)
             normalized_df['quote_asset'] = df['quote_asset']
             normalized_df['funding_rate'] = df['funding_rate']
             
