@@ -296,9 +296,32 @@ class MexcExchange(BaseExchange):
             # Create normalized DataFrame with proper length
             normalized_df = pd.DataFrame(index=df.index)
             
+            # Normalize symbols to remove numerical prefixes (k-token issue)
+            def normalize_mexc_symbol(symbol):
+                """Remove numerical prefixes from MEXC symbols like 1000000BABYDOGE -> BABYDOGE"""
+                if pd.isna(symbol):
+                    return symbol
+                
+                symbol_str = str(symbol)
+                # Remove common numerical prefixes
+                prefixes_to_remove = [
+                    '1000000',  # 1M
+                    '100000',   # 100K
+                    '10000',    # 10K
+                    '1000',     # 1K
+                    '100',      # 100
+                    '10',       # 10
+                ]
+                
+                for prefix in prefixes_to_remove:
+                    if symbol_str.startswith(prefix):
+                        return symbol_str[len(prefix):]
+                
+                return symbol_str
+            
             # Basic mapping
             normalized_df['exchange'] = self.name
-            normalized_df['symbol'] = df['symbol']
+            normalized_df['symbol'] = df['symbol'].apply(normalize_mexc_symbol)
             normalized_df['base_asset'] = df['base_asset']
             normalized_df['quote_asset'] = df['quote_asset']
             normalized_df['funding_rate'] = df['funding_rate']
