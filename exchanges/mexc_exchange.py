@@ -52,6 +52,29 @@ class MexcExchange(BaseExchange):
                 self.logger.info("Bulk fetch failed, falling back to batch processing")
                 return self._fetch_data_batch_optimized(contracts_data)
 
+            # Normalize symbols to remove numerical prefixes (k-token issue)
+            def normalize_mexc_symbol(symbol):
+                """Remove numerical prefixes from MEXC symbols like 1000000BABYDOGE -> BABYDOGE"""
+                if pd.isna(symbol):
+                    return symbol
+                
+                symbol_str = str(symbol)
+                # Remove common numerical prefixes
+                prefixes_to_remove = [
+                    '1000000',  # 1M
+                    '100000',   # 100K
+                    '10000',    # 10K
+                    '1000',     # 1K
+                    '100',      # 100
+                    '10',       # 10
+                ]
+                
+                for prefix in prefixes_to_remove:
+                    if symbol_str.startswith(prefix):
+                        return symbol_str[len(prefix):]
+                
+                return symbol_str
+
             # Process data using bulk results
             all_data = []
             for contract in contracts_data:
@@ -64,7 +87,7 @@ class MexcExchange(BaseExchange):
                 if funding_data:  # Only include contracts with funding data
                     combined_data = {
                         'symbol': symbol,
-                        'base_asset': contract.get('baseCoin', ''),
+                        'base_asset': normalize_mexc_symbol(contract.get('baseCoin', '')),
                         'quote_asset': contract.get('quoteCoin', ''),
                         'funding_rate': funding_data.get('fundingRate', 0),
                         'funding_time': funding_data.get('timestamp', 0),
@@ -220,6 +243,29 @@ class MexcExchange(BaseExchange):
         import concurrent.futures
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
+        # Normalize symbols to remove numerical prefixes (k-token issue)
+        def normalize_mexc_symbol(symbol):
+            """Remove numerical prefixes from MEXC symbols like 1000000BABYDOGE -> BABYDOGE"""
+            if pd.isna(symbol):
+                return symbol
+            
+            symbol_str = str(symbol)
+            # Remove common numerical prefixes
+            prefixes_to_remove = [
+                '1000000',  # 1M
+                '100000',   # 100K
+                '10000',    # 10K
+                '1000',     # 1K
+                '100',      # 100
+                '10',       # 10
+            ]
+            
+            for prefix in prefixes_to_remove:
+                if symbol_str.startswith(prefix):
+                    return symbol_str[len(prefix):]
+            
+            return symbol_str
+        
         all_data = []
         batch_size = 50  # Increased batch size
         total_contracts = len(contracts_data)
@@ -237,7 +283,7 @@ class MexcExchange(BaseExchange):
                     # Combine data
                     return {
                         'symbol': symbol,
-                        'base_asset': contract.get('baseCoin', ''),
+                        'base_asset': normalize_mexc_symbol(contract.get('baseCoin', '')),
                         'quote_asset': contract.get('quoteCoin', ''),
                         'funding_rate': funding_data.get('fundingRate', 0),
                         'funding_time': funding_data.get('timestamp', 0),
