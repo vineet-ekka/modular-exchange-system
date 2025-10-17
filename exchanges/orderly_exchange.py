@@ -193,10 +193,36 @@ class OrderlyExchange(BaseExchange):
                 
                 return '', ''
             
+            def normalize_orderly_asset(asset):
+                """Remove numerical prefixes from Orderly assets like 1000000BABYDOGE -> BABYDOGE"""
+                if pd.isna(asset) or asset == '':
+                    return asset
+                
+                asset_str = str(asset)
+                # Remove common numerical prefixes
+                prefixes_to_remove = [
+                    '1000000',  # 1M
+                    '100000',   # 100K
+                    '10000',    # 10K
+                    '1000',     # 1K
+                    '100',      # 100
+                    '10',       # 10
+                ]
+                
+                for prefix in prefixes_to_remove:
+                    if asset_str.startswith(prefix):
+                        return asset_str[len(prefix):]
+                
+                return asset_str
+            
             # Parse symbols to extract base and quote assets
             parsed_assets = df['symbol'].apply(parse_orderly_symbol)
-            normalized_df['base_asset'] = [assets[0] for assets in parsed_assets]
-            normalized_df['quote_asset'] = [assets[1] for assets in parsed_assets]
+            base_assets = [assets[0] for assets in parsed_assets]
+            quote_assets = [assets[1] for assets in parsed_assets]
+            
+            # Normalize base assets to remove k-token prefixes
+            normalized_df['base_asset'] = [normalize_orderly_asset(asset) for asset in base_assets]
+            normalized_df['quote_asset'] = quote_assets
             normalized_df['funding_rate'] = df['funding_rate']
             normalized_df['funding_interval_hours'] = 8  # Orderly uses 8-hour funding
             normalized_df['contract_type'] = df['contract_type']
