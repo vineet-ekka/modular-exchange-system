@@ -175,8 +175,28 @@ class OrderlyExchange(BaseExchange):
             # Basic mapping
             normalized_df['exchange'] = self.name
             normalized_df['symbol'] = df['symbol']
-            normalized_df['base_asset'] = df['base_asset']
-            normalized_df['quote_asset'] = df['quote_asset']
+            
+            # Extract base_asset and quote_asset from symbol names
+            # Orderly symbols follow pattern: PERP_BASEASSET_QUOTEASSET
+            def parse_orderly_symbol(symbol):
+                if pd.isna(symbol):
+                    return '', ''
+                
+                symbol_str = str(symbol)
+                if symbol_str.startswith('PERP_'):
+                    # Remove PERP_ prefix and split by _
+                    parts = symbol_str[5:].split('_')
+                    if len(parts) >= 2:
+                        base_asset = parts[0]
+                        quote_asset = parts[-1]  # Last part is quote asset
+                        return base_asset, quote_asset
+                
+                return '', ''
+            
+            # Parse symbols to extract base and quote assets
+            parsed_assets = df['symbol'].apply(parse_orderly_symbol)
+            normalized_df['base_asset'] = [assets[0] for assets in parsed_assets]
+            normalized_df['quote_asset'] = [assets[1] for assets in parsed_assets]
             normalized_df['funding_rate'] = df['funding_rate']
             normalized_df['funding_interval_hours'] = 8  # Orderly uses 8-hour funding
             normalized_df['contract_type'] = df['contract_type']
