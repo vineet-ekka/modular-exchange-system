@@ -106,7 +106,10 @@ class ExchangeDataSystem:
             # Step 8: Cleanup stale data from inactive contracts
             self._cleanup_stale_data()
 
-            # Step 9: Check data completeness (hourly)
+            # Step 9: Cleanup old historical funding rate data
+            self._cleanup_historical_data()
+
+            # Step 10: Check data completeness (hourly)
             self._check_data_completeness()
             
             print("\n" + "="*60)
@@ -300,6 +303,39 @@ class ExchangeDataSystem:
             self.logger.error(f"Cleanup error: {e}")
             print(f"! Cleanup error: {e}")
 
+    def _cleanup_historical_data(self):
+        """Remove old historical funding rate data based on retention policy."""
+        from config.settings import HISTORICAL_WINDOW_DAYS
+
+        # Only run cleanup once per hour to avoid excessive deletions
+        current_time = datetime.now(timezone.utc)
+        if hasattr(self, 'last_historical_cleanup'):
+            time_since_last = (current_time - self.last_historical_cleanup).total_seconds()
+            if time_since_last < 3600:  # Less than 1 hour
+                return
+
+        print("\n9. Cleaning up old historical funding rate data...")
+
+        try:
+            # Use the configured retention period (default: 30 days)
+            retention_days = HISTORICAL_WINDOW_DAYS
+
+            # Call the new cleanup function
+            deleted_count = self.db_manager.cleanup_historical_funding_rates(retention_days)
+
+            if deleted_count == -1:
+                print("! Historical data cleanup failed")
+            elif deleted_count == 0:
+                print(f"OK No historical data older than {retention_days} days to remove")
+            else:
+                print(f"OK Removed {deleted_count:,} historical records older than {retention_days} days")
+
+            self.last_historical_cleanup = current_time
+
+        except Exception as e:
+            self.logger.error(f"Historical cleanup error: {e}")
+            print(f"! Historical cleanup error: {e}")
+
     def _check_data_completeness(self, force: bool = False):
         """Check data completeness periodically and log warnings."""
         # Only check every hour to avoid overhead
@@ -310,7 +346,7 @@ class ExchangeDataSystem:
             if time_since_last_check < 3600:  # Less than 1 hour
                 return
         
-        print("\n9. Checking data completeness...")
+        print("\n10. Checking data completeness...")
         
         try:
             # Quick validation for current contracts

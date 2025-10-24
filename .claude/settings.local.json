@@ -67,7 +67,8 @@
       "WebFetch(domain:app.lighter.xyz)",
       "WebFetch(domain:www.okx.com)",
       "WebFetch(domain:bybit-exchange.github.io)",
-      "Read(//c/Users/vinee/.claude/**)"
+      "Read(//c/Users/vinee/.claude/**)",
+      "Bash(npm i:*)"
     ],
     "deny": []
   },

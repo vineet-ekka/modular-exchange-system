@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import ModernPagination from '../Modern/ModernPagination';
 import {
   Area,
   AreaChart,
@@ -36,6 +37,9 @@ interface ContractStats {
 interface PeriodInfo {
   enabled: boolean;
   completeness: number;
+  rawCompleteness: number;
+  actualPoints: number;
+  expectedPoints: number;
   quality: 'high' | 'medium' | 'low';
   showWarning: boolean;
 }
@@ -43,6 +47,55 @@ interface PeriodInfo {
 interface QualityMap {
   [key: number]: PeriodInfo;
 }
+
+// Smart time formatter that adapts to time range to prevent label crowding
+const formatChartTime = (timestamp: string, timeRange?: number): string => {
+  const date = new Date(timestamp);
+
+  // Consistent month names (3-letter abbreviations)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[date.getUTCMonth()];
+  const day = date.getUTCDate();
+
+  // If no timeRange provided (for tables), use detailed format
+  if (timeRange === undefined) {
+    const hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes();
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+
+    const timeString = minutes === 0
+      ? `${displayHours} ${period}`
+      : `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+
+    return `${month} ${day}, ${timeString}`;
+  }
+
+  // For charts, use simplified formats based on time range
+  if (timeRange <= 1) {
+    // 1 day or less: Show time only
+    const hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes();
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+
+    return minutes === 0
+      ? `${displayHours} ${period}`
+      : `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+  } else {
+    // 7+ days: Show date only (no time to reduce crowding)
+    return `${month} ${day}`;
+  }
+};
+
+// Calculate optimal tick interval to show only 6-8 labels
+const calculateTickInterval = (dataLength: number, timeRange: number): number => {
+  // Fewer ticks for longer time ranges
+  const maxTicks = timeRange <= 1 ? 12 : timeRange <= 7 ? 8 : 6;
+  const interval = Math.floor(dataLength / maxTicks);
+  return Math.max(1, interval);
+};
 
 // REQUIRED: Validation helper classes as per chartmasala.md Section 13.4
 class MetricsValidator {
@@ -140,6 +193,8 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
   const [hasMinimumData, setHasMinimumData] = useState<boolean>(true);
   const [showAllData, setShowAllData] = useState<boolean>(false);
   const [showPeriodAverage, setShowPeriodAverage] = useState<boolean>(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 25;
   
   // REQUIRED: Assess period availability based on data completeness (chartmasala.md Section 2.4)
   const assessPeriodAvailability = useCallback((data: HistoricalDataPoint[], fundingIntervalHours: number): QualityMap => {
@@ -152,7 +207,9 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       const cutoffTime = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
       const periodData = data.filter(d => new Date(d.timestamp) >= cutoffTime);
       const actualPoints = periodData.filter(d => d.funding_rate !== null).length;
-      const completeness = expectedPoints > 0 ? (actualPoints / expectedPoints) * 100 : 0;
+      // Cap completeness at 100% but store raw value for transparency
+      const rawCompleteness = expectedPoints > 0 ? (actualPoints / expectedPoints) * 100 : 0;
+      const completeness = Math.min(rawCompleteness, 100);
       
       // Calculate max gap
       let maxGap = 0;
@@ -167,6 +224,9 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       availability[days] = {
         enabled: DataQualityValidator.validatePeriodAvailability(completeness, maxGap, days, fundingIntervalHours),
         completeness,
+        rawCompleteness,
+        actualPoints,
+        expectedPoints,
         quality: completeness >= 90 ? 'high' : completeness >= 70 ? 'medium' : 'low',
         showWarning: completeness >= 50 && completeness < 70
       };
@@ -257,13 +317,7 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       // Process historical data - ALWAYS convert to percentage (chartmasala.md Pattern 1)
       const processedData = historicalResult.data?.map((item: any) => ({
         timestamp: item.timestamp,
-        displayTime: new Date(item.timestamp).toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: 'UTC'
-        }),
+        displayTime: item.timestamp, // Will be formatted based on timeRange when rendering
         funding_rate: item.funding_rate !== null ? item.funding_rate * 100 : null,
         apr: item.apr || null,
         mark_price: item.mark_price || null,
@@ -381,17 +435,32 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
 
   // Prepare chart data with proper formatting
   const chartData = useMemo(() => {
+    let data: HistoricalDataPoint[];
+    let effectiveTimeRange = timeRange;
+
     // If showing all data (for newly listed contracts), use all data
     if (showAllData) {
-      return historicalData;
+      data = historicalData;
+      // Calculate effective time range for formatting
+      if (data.length > 1) {
+        const firstDate = new Date(data[0].timestamp);
+        const lastDate = new Date(data[data.length - 1].timestamp);
+        effectiveTimeRange = Math.ceil((lastDate.getTime() - firstDate.getTime()) / (24 * 60 * 60 * 1000));
+      }
     } else if (timeRange && historicalData.length > 0) {
       // Otherwise, filter by time range
       const now = new Date();
       const cutoffTime = new Date(now.getTime() - timeRange * 24 * 60 * 60 * 1000);
-      return historicalData.filter(d => new Date(d.timestamp) >= cutoffTime);
+      data = historicalData.filter(d => new Date(d.timestamp) >= cutoffTime);
     } else {
-      return historicalData;
+      data = historicalData;
     }
+
+    // Format displayTime based on effective time range
+    return data.map(item => ({
+      ...item,
+      displayTime: formatChartTime(item.timestamp, effectiveTimeRange)
+    }));
   }, [historicalData, timeRange, showAllData]);
 
   // Calculate period average for horizontal reference line
@@ -400,6 +469,21 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
     if (validRates.length === 0) return null;
     return validRates.reduce((sum, d) => sum + d.funding_rate!, 0) / validRates.length;
   }, [chartData]);
+
+  // Pagination logic - reverse data first for table display (newest first)
+  const totalPages = Math.ceil(historicalData.length / pageSize);
+  const paginatedData = useMemo(() => {
+    // Reverse the entire dataset first to show newest entries first
+    const reversedData = [...historicalData].reverse();
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return reversedData.slice(startIndex, endIndex);
+  }, [historicalData, currentPage, pageSize]);
+
+  // Reset to page 1 when contract changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [exchange, symbol]);
 
   const exportToCSV = () => {
     if (chartData.length === 0) return;
@@ -508,13 +592,15 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
     );
   };
 
-  // Custom tooltip for chart
+  // Custom tooltip for chart - shows full timestamp since chart labels are simplified
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload[0]) {
       const data = payload[0].payload;
+      // Always show full timestamp in tooltip
+      const fullTimestamp = formatChartTime(data.timestamp);
       return (
         <div className="bg-white p-3 border border-gray-200 rounded shadow-lg">
-          <p className="text-xs text-gray-500">{data.displayTime}</p>
+          <p className="text-xs text-gray-500">{fullTimestamp}</p>
           <p className="text-sm font-semibold">
             Funding: {data.funding_rate !== null ? `${data.funding_rate.toFixed(4)}%` : 'N/A'}
           </p>
@@ -720,10 +806,11 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
               margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis 
-                dataKey="displayTime" 
-                tick={{ fontSize: 12 }}
+              <XAxis
+                dataKey="displayTime"
+                tick={{ fontSize: 11 }}
                 stroke="#6B7280"
+                interval={calculateTickInterval(chartData.length, showAllData ? 30 : timeRange)}
               />
               <YAxis 
                 tickFormatter={(value) => `${value.toFixed(3)}%`}
@@ -768,15 +855,23 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
       <div className="px-6 py-3 border-b border-light-border bg-gray-50 flex justify-between items-center">
         <div className="flex items-center space-x-4">
           {dataQuality[timeRange] && (
-            <div className="text-xs text-gray-600">
+            <div className="text-xs text-gray-600" title={
+              dataQuality[timeRange].rawCompleteness > 100
+                ? `Actual: ${dataQuality[timeRange].actualPoints} points | Expected: ${dataQuality[timeRange].expectedPoints} points | Raw completeness: ${dataQuality[timeRange].rawCompleteness.toFixed(1)}%`
+                : `Actual: ${dataQuality[timeRange].actualPoints} points | Expected: ${dataQuality[timeRange].expectedPoints} points`
+            }>
               Data Completeness: {dataQuality[timeRange].completeness.toFixed(1)}%
+              {dataQuality[timeRange].rawCompleteness > 100 && (
+                <span className="ml-1 text-blue-600" title="More data points than expected - excellent coverage!">📊</span>
+              )}
               <span className={clsx(
                 'ml-2 px-2 py-0.5 rounded text-xs',
+                dataQuality[timeRange].rawCompleteness > 100 ? 'bg-blue-100 text-blue-700' :
                 dataQuality[timeRange].quality === 'high' ? 'bg-green-100 text-green-700' :
                 dataQuality[timeRange].quality === 'medium' ? 'bg-yellow-100 text-yellow-700' :
                 'bg-orange-100 text-orange-700'
               )}>
-                {dataQuality[timeRange].quality.toUpperCase()}
+                {dataQuality[timeRange].rawCompleteness > 100 ? 'EXCELLENT' : dataQuality[timeRange].quality.toUpperCase()}
               </span>
             </div>
           )}
@@ -822,16 +917,10 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-light-border">
-              {[...historicalData].reverse().map((item, index) => (
+              {paginatedData.map((item, index) => (
                 <tr key={index} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-text-secondary">
-                    {new Date(item.timestamp).toLocaleString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      timeZone: 'UTC'
-                    })}
+                    {formatChartTime(item.timestamp)}
                   </td>
                   <td className={clsx(
                     'px-4 py-2 text-center',
@@ -855,7 +944,29 @@ const HistoricalFundingViewContract: React.FC<HistoricalFundingViewProps> = ({
           </table>
         </div>
       </div>
-      
+
+      {/* Pagination - only show when there are multiple pages */}
+      {totalPages > 1 && (
+        <div className="px-6 py-4 border-t border-light-border bg-white">
+          <ModernPagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            totalItems={historicalData.length}
+            onPageChange={setCurrentPage}
+          />
+        </div>
+      )}
+
+      {/* Show results count when single page */}
+      {totalPages === 1 && (
+        <div className="px-6 py-4 border-t border-light-border bg-white">
+          <div className="text-sm text-text-secondary text-center">
+            Showing all {historicalData.length} results
+          </div>
+        </div>
+      )}
+
       {/* Statistics */}
       {stats.count > 0 && (
         <div className="px-6 py-4 border-t border-light-border bg-gray-50">

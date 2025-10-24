@@ -531,10 +531,10 @@ class PostgresManager:
     def cleanup_old_data(self, days: int = 30) -> bool:
         """
         Remove historical data older than specified days.
-        
+
         Args:
             days: Number of days to keep
-            
+
         Returns:
             True if successful
         """
@@ -543,18 +543,46 @@ class PostgresManager:
             DELETE FROM {self.historical_table_name}
             WHERE timestamp < NOW() - INTERVAL '{days} days'
             """
-            
+
             self.cursor.execute(query)
             deleted = self.cursor.rowcount
             self.connection.commit()
-            
+
             self.logger.info(f"Deleted {deleted} records older than {days} days")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Failed to cleanup old data: {e}")
             self.connection.rollback()
             return False
+
+    def cleanup_historical_funding_rates(self, days: int = 30) -> int:
+        """
+        Remove historical funding rate data older than specified days.
+
+        Args:
+            days: Number of days to keep
+
+        Returns:
+            Number of records deleted (or -1 if error)
+        """
+        try:
+            query = """
+            DELETE FROM funding_rates_historical
+            WHERE funding_time < NOW() - INTERVAL %s
+            """
+
+            self.cursor.execute(query, (f'{days} days',))
+            deleted_count = self.cursor.rowcount
+            self.connection.commit()
+
+            self.logger.info(f"Deleted {deleted_count} historical funding rate records older than {days} days")
+            return deleted_count
+
+        except Exception as e:
+            self.logger.error(f"Failed to cleanup historical funding rates: {e}")
+            self.connection.rollback()
+            return -1
     
     def __del__(self):
         """

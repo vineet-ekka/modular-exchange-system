@@ -149,18 +149,49 @@ export interface ContractArbitrageResponse {
 export const fetchContractArbitrageOpportunities = async (
   minSpread = 0.0001,
   page = 1,
-  pageSize = 20
+  pageSize = 20,
+  filters: Record<string, any> = {}
 ): Promise<ContractArbitrageResponse> => {
   try {
+    // Build query parameters
+    const params = new URLSearchParams({
+      min_spread: minSpread.toString(),
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+
+    // Add array filters (assets, exchanges, intervals)
+    if (filters.assets && filters.assets.length > 0) {
+      filters.assets.forEach((asset: string) => params.append('assets', asset));
+    }
+
+    if (filters.exchanges && filters.exchanges.length > 0) {
+      filters.exchanges.forEach((exchange: string) => params.append('exchanges', exchange));
+    }
+
+    if (filters.intervals && filters.intervals.length > 0) {
+      filters.intervals.forEach((interval: number) => params.append('intervals', interval.toString()));
+    }
+
+    // Add scalar filters
+    if (filters.min_apr !== undefined && filters.min_apr !== null) {
+      params.append('min_apr', filters.min_apr.toString());
+    }
+
+    if (filters.max_apr !== undefined && filters.max_apr !== null) {
+      params.append('max_apr', filters.max_apr.toString());
+    }
+
+    if (filters.min_oi_either !== undefined && filters.min_oi_either !== null) {
+      params.append('min_oi_either', filters.min_oi_either.toString());
+    }
+
+    if (filters.min_oi_combined !== undefined && filters.min_oi_combined !== null) {
+      params.append('min_oi_combined', filters.min_oi_combined.toString());
+    }
+
     const response = await axios.get<ContractArbitrageResponse>(
-      `${API_URL}/api/arbitrage/opportunities-v2`,
-      {
-        params: {
-          min_spread: minSpread,
-          page: page,
-          page_size: pageSize,
-        },
-      }
+      `${API_URL}/api/arbitrage/opportunities-v2?${params.toString()}`
     );
     return response.data;
   } catch (error) {

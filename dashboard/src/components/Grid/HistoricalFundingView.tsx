@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 // Chart components removed - table view only
 import clsx from 'clsx';
 import LiveFundingTicker from '../Ticker/LiveFundingTicker';
+import ModernPagination from '../Modern/ModernPagination';
 // FundingChartTooltip removed - no longer using charts
 import { calculateContractStats } from '../../utils/fundingChartUtils';
 import type { ProcessedFundingData } from '../../types/fundingChart';
@@ -19,6 +20,26 @@ interface ChartDataPoint {
   [key: string]: string | number | null;
 }
 
+// Smart time formatter - uses detailed format for tables
+const formatChartTime = (timestamp: string): string => {
+  const date = new Date(timestamp);
+
+  // Consistent month names (3-letter abbreviations)
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = monthNames[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+
+  const timeString = minutes === 0
+    ? `${displayHours} ${period}`
+    : `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+
+  return `${month} ${day}, ${timeString}`;
+}
 
 interface HistoricalFundingViewProps {
   asset: string;
@@ -93,7 +114,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
   const [allContracts, setAllContracts] = useState<Array<{symbol: string, exchange: string}>>([]);  // All available contracts with exchange info
   const [selectedContract, setSelectedContract] = useState<string>('');  // Single selected contract
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState(7); // days
+  const [timeRange, setTimeRange] = useState(30); // days
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,6 +122,8 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
   const [fundingInterval, setFundingInterval] = useState<number>(8);
   const [actualFundingTimes, setActualFundingTimes] = useState<string[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 25;
 
   // Handle clicks outside dropdown
   useEffect(() => {
@@ -144,14 +167,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
         // Process funding data - now handling contracts instead of exchanges
         const processedFundingData = fundingResult.data.map((item: HistoricalDataPoint) => {
           const point: ChartDataPoint = {
-            timestamp: new Date(item.timestamp).toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-              timeZone: 'UTC',
-              timeZoneName: 'short'
-            }),
+            timestamp: formatChartTime(item.timestamp),
             rawTimestamp: item.timestamp
           };
           
@@ -315,6 +331,19 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
     }
     groupedContracts[contract.exchange].push(contract);
   });
+
+  // Pagination logic
+  const totalPages = Math.ceil(historicalData.length / pageSize);
+  const paginatedData = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return historicalData.slice(startIndex, endIndex);
+  }, [historicalData, currentPage, pageSize]);
+
+  // Reset to page 1 when selectedContract changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedContract]);
 
   if (loading) {
     return (
@@ -487,7 +516,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-light-border">
-                  {[...historicalData].reverse().map((item, index) => (
+                  {[...paginatedData].reverse().map((item, index) => (
                     <tr key={index} className="hover:bg-gray-50">
                       <td className="px-4 py-2 text-text-secondary">{item.timestamp}</td>
                       {selectedContract && (() => {
@@ -525,6 +554,28 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
             </div>
           </div>
         </div>
+
+        {/* Pagination - only show when there are multiple pages */}
+        {totalPages > 1 && (
+          <div className="px-6 py-4 border-t border-light-border bg-white">
+            <ModernPagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalItems={historicalData.length}
+              onPageChange={setCurrentPage}
+            />
+          </div>
+        )}
+
+        {/* Show results count when single page */}
+        {totalPages === 1 && (
+          <div className="px-6 py-4 border-t border-light-border bg-white">
+            <div className="text-sm text-text-secondary text-center">
+              Showing all {historicalData.length} results
+            </div>
+          </div>
+        )}
 
         {/* Summary Statistics */}
         <div className="px-6 py-4 border-t border-light-border bg-gray-50">

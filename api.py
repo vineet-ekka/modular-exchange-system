@@ -1033,11 +1033,102 @@ async def get_arbitrage_opportunities(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/arbitrage/assets/search")
+async def search_arbitrage_assets(
+    q: str = Query(..., min_length=1, description="Search query for assets"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum results to return")
+):
+    """
+    Server-side fuzzy search for assets with arbitrage opportunities.
+    Groups by base_asset from exchange_data table to show unique assets
+    that have active arbitrage opportunities across exchanges.
+
+    Search algorithm:
+    1. Exact prefix match on base_asset (highest priority)
+    2. Case-insensitive contains match on base_asset or symbol
+    3. Order by average spread (highest first)
+
+    Returns assets with their average spreads, number of exchanges,
+    and other statistics to help users identify interesting opportunities.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        search_pattern = f"%{q}%"
+        prefix_pattern = f"{q}%"
+
+        query = """
+        WITH asset_stats AS (
+            SELECT
+                ed.base_asset as symbol,
+                ed.base_asset as name,
+                COUNT(DISTINCT ed.exchange) as exchanges,
+                AVG(ABS(ed.funding_rate)) * 100 as avg_spread_pct,
+                AVG(ed.apr) as avg_apr,
+                MAX(ABS(ed.funding_rate)) * 100 as max_spread_pct,
+                COUNT(*) as total_opportunities,
+                MAX(ed.last_updated) as last_updated
+            FROM exchange_data ed
+            LEFT JOIN contract_metadata cm
+                ON ed.exchange = cm.exchange AND ed.symbol = cm.symbol
+            WHERE ed.base_asset IS NOT NULL
+                AND ed.funding_rate IS NOT NULL
+                AND (ed.base_asset ILIKE %s OR ed.symbol ILIKE %s)
+                AND ed.last_updated > NOW() - INTERVAL '1 hour'
+                AND (cm.is_active = true OR cm.is_active IS NULL)
+            GROUP BY ed.base_asset
+            HAVING COUNT(DISTINCT ed.exchange) >= 2
+        )
+        SELECT * FROM asset_stats
+        ORDER BY
+            CASE WHEN symbol ILIKE %s THEN 1 ELSE 2 END,
+            avg_spread_pct DESC
+        LIMIT %s
+        """
+
+        cur.execute(query, [search_pattern, search_pattern, prefix_pattern, limit])
+
+        results = []
+        for row in cur.fetchall():
+            results.append({
+                'symbol': row['symbol'],
+                'name': row['name'],
+                'exchanges': row['exchanges'],
+                'avg_spread_pct': sanitize_numeric_value(row['avg_spread_pct']),
+                'avg_apr': sanitize_numeric_value(row['avg_apr']),
+                'max_spread_pct': sanitize_numeric_value(row['max_spread_pct']),
+                'total_opportunities': row['total_opportunities'],
+                'last_updated': row['last_updated'].isoformat() if row['last_updated'] else None
+            })
+
+        return {
+            "results": results,
+            "query": q,
+            "count": len(results),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error in asset search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        return_db_connection(conn)
+
 @app.get("/api/arbitrage/opportunities-v2")
 async def get_contract_level_arbitrage_opportunities(
     min_spread: float = Query(0.001, description="Minimum spread to consider (0.001 = 0.1%)"),
     page: int = Query(1, ge=1, description="Page number for pagination"),
-    page_size: int = Query(20, ge=1, le=50, description="Number of results per page")
+    page_size: int = Query(20, ge=1, le=50, description="Number of results per page"),
+    # NEW FILTER PARAMETERS
+    assets: Optional[List[str]] = Query(None, description="Filter by specific assets (e.g., BTC, ETH)"),
+    exchanges: Optional[List[str]] = Query(None, description="Filter by specific exchanges"),
+    intervals: Optional[List[int]] = Query(None, description="Filter by funding intervals in hours (1, 4, 8, etc.)"),
+    min_apr: Optional[float] = Query(None, description="Minimum APR spread percentage"),
+    max_apr: Optional[float] = Query(None, description="Maximum APR spread percentage"),
+    min_oi_either: Optional[float] = Query(None, description="Minimum open interest for either position"),
+    min_oi_combined: Optional[float] = Query(None, description="Minimum combined open interest")
 ):
     """
     Get contract-specific arbitrage opportunities with correct Z-scores.
@@ -1053,23 +1144,68 @@ async def get_contract_level_arbitrage_opportunities(
         - Pagination metadata for navigation
     """
     try:
-        # Check Redis cache first for faster response
-        cache_key = f"arbitrage:v2:{page}:{page_size}:{min_spread}"
+        # Normalize exchange names to match database format
+        # Frontend sends lowercase, database has proper case
+        exchange_name_mapping = {
+            'binance': 'Binance',
+            'bybit': 'ByBit',
+            'kucoin': 'KuCoin',
+            'backpack': 'Backpack',
+            'hyperliquid': 'Hyperliquid',
+            'aster': 'Aster',
+            'drift': 'Drift',
+            'lighter': 'Lighter',
+            'deribit': 'Deribit',
+            'kraken': 'Kraken'
+        }
+
+        # Normalize the exchanges list if provided
+        if exchanges:
+            normalized_exchanges = []
+            for ex in exchanges:
+                # Try to map lowercase to proper case, fallback to original if not found
+                normalized_exchanges.append(exchange_name_mapping.get(ex.lower(), ex))
+            exchanges = normalized_exchanges
+
+        # Update cache key to include filters
+        # Sort filter arrays to ensure consistent cache keys
+        # Use normalized exchanges for cache key to ensure uniqueness
+        filter_hash = hashlib.md5(
+            f"{sorted(assets or [])}{sorted(exchanges or [])}{sorted(intervals or [])}"
+            f"{min_apr}{max_apr}{min_oi_either}{min_oi_combined}".encode()
+        ).hexdigest()[:8]
+        cache_key = f"arbitrage:v2:{page}:{page_size}:{min_spread}:{filter_hash}"
+
+        # Debug logging for cache
+        logger.info(f"Cache key generated: {cache_key}")
+        logger.info(f"Normalized exchanges for cache: {exchanges}")
 
         # Try to get from cache
         cached_result = api_cache.get(cache_key)
         if cached_result:
-            logger.info(f"Cache hit for arbitrage page {page}")
+            logger.info(f"Cache hit for arbitrage page {page} with filters: {exchanges}")
             return cached_result
+        else:
+            logger.info(f"Cache miss for arbitrage page {page} with filters: {exchanges}")
 
         # Import the new contract-level scanner
         from utils.arbitrage_scanner import calculate_contract_level_arbitrage
 
-        # Find contract-level opportunities with pagination
+        # Debug: Log exactly what we're passing to the function
+        logger.info(f"CALLING arbitrage_scanner with exchanges: {exchanges}")
+
+        # Find contract-level opportunities with pagination and filters
         result = calculate_contract_level_arbitrage(
             min_spread=min_spread,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            assets=assets,
+            exchanges=exchanges,
+            intervals=intervals,
+            min_apr=min_apr,
+            max_apr=max_apr,
+            min_oi_either=min_oi_either,
+            min_oi_combined=min_oi_combined
         )
 
         # Sanitize the result to remove NaN/Infinity values
@@ -1085,7 +1221,14 @@ async def get_contract_level_arbitrage_opportunities(
             'parameters': {
                 'min_spread': min_spread,
                 'page': page,
-                'page_size': page_size
+                'page_size': page_size,
+                'assets': assets,
+                'exchanges': exchanges,
+                'intervals': intervals,
+                'min_apr': min_apr,
+                'max_apr': max_apr,
+                'min_oi_either': min_oi_either,
+                'min_oi_combined': min_oi_combined
             },
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'version': 'v2-contract-level-paginated'
@@ -1372,8 +1515,9 @@ async def get_historical_funding_by_contract(
         start_date = end_date - timedelta(days=days)
         
         # Get historical data for this specific contract (case-insensitive for exchange)
+        # Use DISTINCT ON to eliminate duplicate timestamps, keeping the most recent record
         query_historical = """
-            SELECT
+            SELECT DISTINCT ON (funding_time)
                 exchange,
                 symbol,
                 base_asset,

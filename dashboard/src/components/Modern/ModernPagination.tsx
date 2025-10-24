@@ -1,6 +1,5 @@
 import React from 'react';
 import clsx from 'clsx';
-import ModernButton from './ModernButton';
 
 interface ModernPaginationProps {
   currentPage: number;
@@ -34,79 +33,15 @@ const ModernPagination: React.FC<ModernPaginationProps> = ({
     }
   };
 
-  const handlePageClick = (page: number) => {
-    onPageChange(page);
-  };
-
-  const renderPageNumbers = () => {
-    const pages: (number | string)[] = [];
-    const maxVisible = 7;
-    const halfVisible = Math.floor(maxVisible / 2);
-
-    let startPage = Math.max(1, currentPage - halfVisible);
-    let endPage = Math.min(totalPages, currentPage + halfVisible);
-
-    if (currentPage <= halfVisible) {
-      endPage = Math.min(totalPages, maxVisible);
-    }
-
-    if (currentPage > totalPages - halfVisible) {
-      startPage = Math.max(1, totalPages - maxVisible + 1);
-    }
-
-    if (startPage > 1) {
-      pages.push(1);
-      if (startPage > 2) {
-        pages.push('...');
-      }
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
-
-    if (endPage < totalPages) {
-      if (endPage < totalPages - 1) {
-        pages.push('...');
-      }
-      pages.push(totalPages);
-    }
-
-    return pages.map((page, index) => {
-      if (page === '...') {
-        return (
-          <span
-            key={`ellipsis-${index}`}
-            className="px-3 py-1 text-text-tertiary"
-          >
-            ...
-          </span>
-        );
-      }
-
-      const pageNumber = page as number;
-      const isActive = pageNumber === currentPage;
-
-      return (
-        <button
-          key={pageNumber}
-          onClick={() => handlePageClick(pageNumber)}
-          className={clsx(
-            'px-3 py-1 rounded-md font-medium text-sm transition-colors duration-150',
-            {
-              'bg-primary text-white': isActive,
-              'bg-transparent text-text-primary hover:bg-gray-100': !isActive,
-            }
-          )}
-        >
-          {pageNumber}
-        </button>
-      );
-    });
-  };
-
+  // Show only the count when there's 1 page or less
   if (totalPages <= 1) {
-    return null;
+    return (
+      <div className={clsx('text-sm text-text-secondary', className)}>
+        Showing <span className="font-medium text-text-primary">{startItem}</span> to{' '}
+        <span className="font-medium text-text-primary">{endItem}</span> of{' '}
+        <span className="font-medium text-text-primary">{totalItems}</span> results
+      </div>
+    );
   }
 
   return (
@@ -118,14 +53,19 @@ const ModernPagination: React.FC<ModernPaginationProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <ModernButton
-          variant="ghost"
-          size="sm"
+        <button
           onClick={handlePrevious}
           disabled={currentPage === 1}
+          className={clsx(
+            'inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+            currentPage === 1
+              ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+              : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+          )}
         >
           <svg
-            className="w-4 h-4"
+            className="w-4 h-4 mr-1.5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -138,21 +78,26 @@ const ModernPagination: React.FC<ModernPaginationProps> = ({
             />
           </svg>
           Previous
-        </ModernButton>
+        </button>
 
-        <div className="flex items-center gap-1">
-          {renderPageNumbers()}
+        <div className="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-gray-100 text-gray-900 rounded-md">
+          Page {currentPage} of {totalPages}
         </div>
 
-        <ModernButton
-          variant="ghost"
-          size="sm"
+        <button
           onClick={handleNext}
           disabled={currentPage === totalPages}
+          className={clsx(
+            'inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+            currentPage === totalPages
+              ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
+              : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+          )}
         >
           Next
           <svg
-            className="w-4 h-4"
+            className="w-4 h-4 ml-1.5"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -164,7 +109,7 @@ const ModernPagination: React.FC<ModernPaginationProps> = ({
               d="M9 5l7 7-7 7"
             />
           </svg>
-        </ModernButton>
+        </button>
       </div>
     </div>
   );

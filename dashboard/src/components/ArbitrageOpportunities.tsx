@@ -7,6 +7,8 @@ import {
 } from '../services/arbitrage';
 import { ModernCard, ModernButton, ModernSelect, ModernToggle, ModernTable, ModernBadge, ModernTooltip, ModernPagination } from './Modern';
 import clsx from 'clsx';
+import { useArbitrageFilter } from '../hooks/useArbitrageFilter';
+import ArbitrageFilterPanel from './Arbitrage/ArbitrageFilterPanel';
 
 const ArbitrageOpportunities: React.FC = () => {
   const navigate = useNavigate();
@@ -22,6 +24,15 @@ const ArbitrageOpportunities: React.FC = () => {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Add filter state management
+  const {
+    filterState,
+    updateFilter,
+    resetFilter,
+    filterCount,
+    buildQueryParams
+  } = useArbitrageFilter();
+
   const fetchData = useCallback(async () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -31,7 +42,17 @@ const ArbitrageOpportunities: React.FC = () => {
 
     try {
       setLoading(true);
-      const response = await fetchContractArbitrageOpportunities(minSpread, currentPage, pageSize);
+
+      // Build filter parameters
+      const filterParams = buildQueryParams();
+
+      // Pass filter parameters to the API call
+      const response = await fetchContractArbitrageOpportunities(
+        minSpread,
+        currentPage,
+        pageSize,
+        filterParams
+      );
 
       if (!abortControllerRef.current.signal.aborted) {
         console.log('✅ Arbitrage data received:', response);
@@ -48,7 +69,7 @@ const ArbitrageOpportunities: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [minSpread, pageSize, currentPage]);
+  }, [minSpread, pageSize, currentPage, buildQueryParams]);
 
   // Initial fetch and fetch on filter changes
   useEffect(() => {
@@ -154,18 +175,6 @@ const ArbitrageOpportunities: React.FC = () => {
           aValue = a.rate_spread_pct;
           bValue = b.rate_spread_pct;
           break;
-        case 'hourly':
-          aValue = a.effective_hourly_spread;
-          bValue = b.effective_hourly_spread;
-          break;
-        case 'sync':
-          aValue = a.sync_period_spread;
-          bValue = b.sync_period_spread;
-          break;
-        case 'daily':
-          aValue = a.daily_spread;
-          bValue = b.daily_spread;
-          break;
         default:
           return 0;
       }
@@ -261,7 +270,7 @@ const ArbitrageOpportunities: React.FC = () => {
           content="The funding rate difference between long and short positions. APR Spread shows the annualized percentage return from this arbitrage opportunity."
           position="bottom"
         >
-          <span>Spread</span>
+          <span>Funding Rate Spread</span>
         </ModernTooltip>
       ),
       accessor: (row: ContractArbitrageOpportunity) => (
@@ -276,76 +285,6 @@ const ArbitrageOpportunities: React.FC = () => {
       ),
       align: 'center' as const,
       width: '10%',
-      sortable: true,
-    },
-    {
-      key: 'hourly',
-      header: (
-        <ModernTooltip
-          content="Normalized hourly funding rates for comparison. Shows long (L) and short (S) positions' hourly rates, and the effective hourly profit spread when holding both positions."
-          position="bottom"
-        >
-          <span>Effective Hourly</span>
-        </ModernTooltip>
-      ),
-      accessor: (row: ContractArbitrageOpportunity) => (
-        <div>
-          <div className="text-sm text-text-secondary">L: {formatPercentage(row.long_hourly_rate)}/h</div>
-          <div className="text-sm text-text-secondary">S: {formatPercentage(row.short_hourly_rate)}/h</div>
-          <div className="text-sm font-bold text-primary">
-            {formatPercentage(row.effective_hourly_spread)}/h
-          </div>
-        </div>
-      ),
-      align: 'center' as const,
-      width: '12%',
-      sortable: true,
-    },
-    {
-      key: 'sync',
-      header: (
-        <ModernTooltip
-          content="The synchronized period (LCM of funding intervals) when both positions complete full funding cycles together. Shows the cumulative funding spread over this period for accurate profit calculation."
-          position="bottom"
-        >
-          <span>Sync Period</span>
-        </ModernTooltip>
-      ),
-      accessor: (row: ContractArbitrageOpportunity) => (
-        <div>
-          <div className="text-xs text-text-secondary">{row.sync_period_hours}h period</div>
-          <div className="text-xs text-text-tertiary">L: {formatPercentage(row.long_sync_funding)}</div>
-          <div className="text-xs text-text-tertiary">S: {formatPercentage(row.short_sync_funding)}</div>
-          <div className="text-sm font-bold text-warning">
-            Net: {formatPercentage(row.sync_period_spread)}
-          </div>
-        </div>
-      ),
-      align: 'center' as const,
-      width: '10%',
-      sortable: true,
-    },
-    {
-      key: 'daily',
-      header: (
-        <ModernTooltip
-          content="Cumulative funding rates over a 24-hour period. Shows what you'd pay (L) and receive (S) in funding over one day, with the net daily spread at the bottom."
-          position="bottom"
-        >
-          <span>24h Funding</span>
-        </ModernTooltip>
-      ),
-      accessor: (row: ContractArbitrageOpportunity) => (
-        <div>
-          <div className="text-sm text-text-secondary">L: {formatPercentage(row.long_daily_funding)}</div>
-          <div className="text-sm text-text-secondary">S: {formatPercentage(row.short_daily_funding)}</div>
-          <div className="text-sm font-bold text-success">
-            {formatPercentage(row.daily_spread)}
-          </div>
-        </div>
-      ),
-      align: 'center' as const,
-      width: '12%',
       sortable: true,
     },
     {
@@ -410,6 +349,21 @@ const ArbitrageOpportunities: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Filter Panel */}
+      <ArbitrageFilterPanel
+        filterState={filterState}
+        onFilterChange={updateFilter}
+        onApply={() => {
+          setCurrentPage(1); // Reset to first page on filter apply
+          fetchData();
+        }}
+        onReset={() => {
+          resetFilter();
+          setCurrentPage(1);
+          fetchData();
+        }}
+      />
+
       {/* Controls */}
       <ModernCard padding="lg">
         <div className="flex flex-wrap gap-4 items-end">
@@ -498,10 +452,10 @@ const ArbitrageOpportunities: React.FC = () => {
 
           <ModernCard variant="flat" padding="md">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
-              Significant (|Z| &gt; 2)
+              Max APR Spread
             </div>
-            <div className="text-2xl font-bold text-primary">
-              {data?.statistics?.significant_count || 0}
+            <div className="text-2xl font-bold text-warning">
+              {formatAPR(data?.statistics?.max_apr_spread || 0)}
             </div>
           </ModernCard>
 
