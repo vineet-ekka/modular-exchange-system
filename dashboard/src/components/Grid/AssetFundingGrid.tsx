@@ -466,7 +466,7 @@ const AssetFundingGrid: React.FC = () => {
             <tr>
               <th
                 onClick={() => handleSort('asset')}
-                className="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:bg-gray-100 sticky left-0 bg-gray-50 z-10"
+                className="px-2 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:bg-gray-100 sticky left-0 bg-gray-50 z-10"
               >
                 Asset {sortColumn === 'asset' && (sortDirection === 'asc' ? '↑' : '↓')}
               </th>
@@ -474,7 +474,7 @@ const AssetFundingGrid: React.FC = () => {
                 <th
                   key={exchange}
                   onClick={() => handleSort(exchange)}
-                  className="px-4 py-3 text-center text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[100px]"
+                  className="px-2 py-3 text-center text-xs font-medium text-text-secondary uppercase tracking-wider cursor-pointer hover:bg-gray-100 min-w-[75px]"
                 >
                   {exchange}
                   {sortColumn === exchange && (
@@ -484,14 +484,14 @@ const AssetFundingGrid: React.FC = () => {
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-light-border bg-white">
+          <tbody className="divide-y divide-gray-300 bg-white">
             {sortedData.map((item) => (
               <Fragment key={item.asset}>
                 <tr
                   onClick={() => toggleAssetExpansion(item.asset)}
                   className="hover:bg-gray-50 transition-colors cursor-pointer"
                 >
-                  <td className="px-4 py-3 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-light-border">
+                  <td className="px-2 py-3 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-light-border">
                     <div className="flex items-center space-x-2">
                       <span className="text-gray-400 text-xs">
                         {expandedAssets.has(item.asset) || autoExpandedAssets.has(item.asset) ? '▼' : '▶'}
@@ -515,7 +515,7 @@ const AssetFundingGrid: React.FC = () => {
                       <td
                         key={exchange}
                         className={clsx(
-                          'px-4 py-3 text-center whitespace-nowrap text-sm relative',
+                          'px-2 py-3 text-center whitespace-nowrap text-sm relative',
                           getRateBgColor(displayValue),
                           shouldHighlight && 'bg-orange-50 border border-orange-200'
                         )}

@@ -264,8 +264,11 @@ cd modular-exchange-system
 
 #### 2. Install Dependencies
 ```bash
-# Python dependencies
-pip install -r requirements.txt  # All required packages included
+# Python dependencies from requirements.txt
+pip install -r requirements.txt
+
+# CRITICAL: Install missing dependencies not in requirements.txt
+pip install fastapi uvicorn psutil scipy websockets
 
 # Dashboard dependencies
 cd dashboard && npm install && cd ..
@@ -361,57 +364,81 @@ ACTIVE_SCHEDULE = "default"
 
 ## API Documentation
 
-### Core Endpoints
+### Complete API Endpoints (39 Total)
 
-#### Data Retrieval
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/funding-rates` | GET | Current funding rates with filters |
-| `/api/funding-rates-grid` | GET | Asset-based grid view |
-| `/api/historical-funding/{symbol}` | GET | Historical rates for symbol |
-| `/api/historical-funding-by-asset/{asset}` | GET | Historical by asset (all contracts) |
-| `/api/contracts-by-asset/{asset}` | GET | List contracts for an asset |
-| `/api/current-funding/{asset}` | GET | Current rate with countdown |
+#### Data Retrieval Endpoints
+```bash
+GET /api/funding-rates                      # Current funding rates with filters
+GET /api/funding-rates-grid                 # Asset-based grid view
+GET /api/historical/{symbol}                # Historical rates for specific symbol
+GET /api/historical-funding/{symbol}        # Historical funding data with intervals
+GET /api/historical-funding-by-asset/{asset}  # All contracts for an asset
+GET /api/historical-funding-by-contract/{exchange}/{symbol}  # Contract-specific history
+GET /api/current-funding/{asset}            # Current rate with countdown timer
+GET /api/funding-sparkline/{symbol}         # Sparkline data for mini-charts
+GET /api/contracts-by-asset/{asset}         # List all contracts for an asset
+```
 
-#### Statistics & Analytics
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/statistics` | GET | Dashboard statistics |
-| `/api/top-apr/{limit}` | GET | Top APR contracts |
-| `/api/group-by-asset` | GET | Grouped by base asset |
-| `/api/funding-sparkline/{symbol}` | GET | Sparkline data |
-| `/api/contracts-with-zscores` | GET | All contracts with Z-score data |
-| `/api/zscore-summary` | GET | Z-score summary statistics |
-| `/api/arbitrage/opportunities` | GET | Cross-exchange arbitrage opportunities |
-| `/api/health/performance` | GET | System performance metrics |
+#### Statistics & Analytics Endpoints
+```bash
+GET /api/statistics                         # Dashboard statistics
+GET /api/statistics/summary                 # Overall system statistics
+GET /api/statistics/extreme-values          # Statistical outliers and extremes
+GET /api/top-apr/{limit}                    # Top APR contracts
+GET /api/group-by-asset                     # Grouped by base asset
+GET /api/contracts-with-zscores             # All contracts with Z-score data
+GET /api/zscore-summary                     # Z-score summary statistics
+```
+
+#### Arbitrage Endpoints
+```bash
+GET /api/arbitrage/opportunities            # Legacy arbitrage endpoint with basic pagination
+GET /api/arbitrage/opportunities-v2         # Enhanced endpoint with multi-parameter filtering
+GET /api/arbitrage/assets/search            # Search for assets in arbitrage opportunities
+GET /api/arbitrage/opportunity-detail/{asset}/{long_exchange}/{short_exchange}  # Detailed opportunity data
+```
+
+#### System Health & Performance
+```bash
+GET /api/health                             # Basic health check
+GET /api/health/performance                 # System performance metrics
+GET /api/health/cache                       # Cache health monitoring (Redis)
+```
+
+#### Backfill Management
+```bash
+GET /api/backfill-status                    # Current backfill progress
+GET /api/backfill/status                    # Detailed backfill status
+GET /api/backfill/verify                    # Verify backfill completeness
+POST /api/backfill/start                    # Start historical backfill
+POST /api/backfill/stop                     # Stop running backfill
+POST /api/backfill/retry                    # Retry failed backfills
+```
 
 #### Settings Management
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/settings` | GET | Retrieve current settings |
-| `/api/settings` | PUT | Update settings |
-| `/api/settings/validate` | POST | Validate without saving |
-| `/api/settings/backups` | GET | List available backups |
-| `/api/settings/restore` | POST | Restore from backup |
-| `/api/settings/export` | GET | Export as JSON |
-| `/api/settings/import` | POST | Import from JSON |
+```bash
+GET /api/settings                           # Retrieve current settings
+PUT /api/settings                           # Update settings
+POST /api/settings/validate                 # Validate settings without saving
+GET /api/settings/backups                   # List available backups
+POST /api/settings/restore                  # Restore from backup
+GET /api/settings/export                    # Export settings as JSON
+POST /api/settings/import                   # Import settings from JSON
+POST /api/settings/reset                    # Reset to default settings
+```
+
+#### Metadata & Discovery
+```bash
+GET /api/exchanges                          # List all exchanges
+GET /api/assets                             # List all unique assets
+GET /                                       # Root endpoint with system info
+GET /api/test                               # Test endpoint for debugging
+```
 
 #### System Control
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/backfill/start` | POST | Start backfill |
-| `/api/backfill/stop` | POST | Stop backfill |
-| `/api/backfill-status` | GET | Backfill progress |
-| `/api/shutdown` | POST | Clean shutdown |
-
-### System Monitoring & Analytics
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health/performance` | GET | System performance metrics |
-| `/api/statistics/extreme-values` | GET | Statistical outliers and extremes |
-| `/api/statistics/summary` | GET | Overall system statistics |
-| `/api/arbitrage/opportunities-v2` | GET | Paginated arbitrage opportunities with filtering |
+```bash
+POST /api/shutdown                          # Clean shutdown of services
+```
 
 ### Request/Response Examples
 
@@ -1092,6 +1119,43 @@ Check for asset-specific issues in logs. The system may be retrying failed reque
 - On Windows, check if Python is in PATH
 - Ensure all required dependencies are installed: `pip install -r requirements.txt`
 
+#### Redis Cache Monitoring
+```bash
+# Check cache health
+curl http://localhost:8000/api/health/cache
+
+# Redis statistics
+docker exec -it exchange_redis redis-cli INFO stats
+docker exec -it exchange_redis redis-cli DBSIZE      # Number of cached keys
+docker exec -it exchange_redis redis-cli INFO memory # Memory usage
+
+# Check specific cache keys
+docker exec -it exchange_redis redis-cli KEYS "*funding-rates*"
+docker exec -it exchange_redis redis-cli GET "cache_key_name"
+docker exec -it exchange_redis redis-cli TTL "cache_key_name"  # Time to live
+
+# Monitor cache performance
+curl http://localhost:8000/api/health/performance | python -m json.tool
+
+# Check arbitrage filter performance
+curl "http://localhost:8000/api/arbitrage/opportunities-v2?exchanges=binance&exchanges=kucoin" -w "\nTime: %{time_total}s\n"
+```
+
+#### System Performance Monitoring
+```bash
+# View Z-score calculation status
+curl http://localhost:8000/api/contracts-with-zscores | python -m json.tool | head -50
+
+# Check backfill status
+curl http://localhost:8000/api/backfill-status | python -m json.tool
+
+# Monitor API response times
+time curl -s http://localhost:8000/api/funding-rates-grid > /dev/null
+
+# Check system performance metrics
+curl http://localhost:8000/api/health/performance | python -m json.tool
+```
+
 ## Scripts & Utilities
 
 ### Contract Health Monitoring
@@ -1167,10 +1231,33 @@ python main.py --loop --interval 30
 ```
 
 ### Testing
+
+#### Frontend Tests
 ```bash
-# JavaScript tests
+# Run all React tests
 cd dashboard && npm test
 
+# Run tests in watch mode
+cd dashboard && npm test -- --watch
+
+# Run tests with coverage report
+cd dashboard && npm test -- --coverage
+
+# TypeScript type checking
+cd dashboard && npx tsc --noEmit
+```
+
+#### Frontend Build
+```bash
+# Production build
+cd dashboard && npm run build
+
+# Serve production build locally
+cd dashboard && npx serve -s build
+```
+
+#### Exchange Integration Tests
+```bash
 # Test exchange connections
 python -c "from exchanges.binance_exchange import BinanceExchange; e=BinanceExchange(); print(f'Binance: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.kucoin_exchange import KuCoinExchange; e=KuCoinExchange(); print(f'KuCoin: {len(e.fetch_data())} contracts')"
@@ -1180,6 +1267,13 @@ python -c "from exchanges.hyperliquid_exchange import HyperliquidExchange; e=Hyp
 python -c "from exchanges.aster_exchange import AsterExchange; e=AsterExchange(); print(f'Aster: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.lighter_exchange import LighterExchange; e=LighterExchange(); print(f'Lighter: {len(e.fetch_data())} contracts')"
 python -c "from exchanges.drift_exchange import DriftExchange; e=DriftExchange(); print(f'Drift: {len(e.fetch_data())} contracts')"
+```
+
+#### Python Syntax Validation
+```bash
+# Verify Python syntax after edits
+python -m py_compile api.py main.py
+python -m py_compile utils/*.py exchanges/*.py scripts/*.py
 ```
 
 ---

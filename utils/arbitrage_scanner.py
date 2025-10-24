@@ -714,14 +714,60 @@ def calculate_contract_level_arbitrage(
         # When multiple exchanges are selected, show only opportunities where BOTH
         # the long and short positions are in the selected exchanges
         if exchanges:
-            filtered_opportunities = []
-            for o in opportunities:
-                long_ex = o.get('long_exchange')
-                short_ex = o.get('short_exchange')
-                if long_ex in exchanges and short_ex in exchanges:
-                    filtered_opportunities.append(o)
+            # Normalize exchange names for case-insensitive matching
+            # Frontend sends lowercase ("binance"), database stores specific casing ("Binance", "ByBit", "KuCoin", etc.)
+            EXCHANGE_NAME_MAP = {
+                'binance': 'Binance',
+                'bybit': 'ByBit',
+                'kucoin': 'KuCoin',
+                'mexc': 'MEXC',
+                'dydx': 'dYdX',
+                'backpack': 'Backpack',
+                'hyperliquid': 'Hyperliquid',
+                'drift': 'Drift',
+                'aster': 'Aster',
+                'lighter': 'Lighter',
+                'pacifica': 'Pacifica',
+                'paradex': 'Paradex',
+                'hibachi': 'Hibachi',
+                'orderly': 'Orderly',
+                'deribit': 'Deribit'
+            }
 
-            logger.info(f"Exchange filter - Opportunities after filter (BETWEEN selected exchanges): {len(filtered_opportunities)}")
+            normalized_exchanges = set()
+            for ex in exchanges:
+                # Try exact match first, then lowercase match, then capitalize as fallback
+                if ex in EXCHANGE_NAME_MAP.values():
+                    normalized_exchanges.add(ex)
+                elif ex.lower() in EXCHANGE_NAME_MAP:
+                    normalized_exchanges.add(EXCHANGE_NAME_MAP[ex.lower()])
+                else:
+                    # Fallback: capitalize first letter
+                    normalized_exchanges.add(ex.capitalize())
+
+            logger.info(f"Exchange filter - Normalized exchanges: {normalized_exchanges}")
+
+            filtered_opportunities = []
+
+            # Different logic based on number of selected exchanges:
+            # - Single exchange: Show ALL opportunities involving that exchange (OR logic)
+            # - Multiple exchanges: Show ONLY opportunities BETWEEN selected exchanges (AND logic)
+            if len(normalized_exchanges) == 1:
+                # Single exchange: show all opportunities involving it
+                for o in opportunities:
+                    long_ex = o.get('long_exchange')
+                    short_ex = o.get('short_exchange')
+                    if long_ex in normalized_exchanges or short_ex in normalized_exchanges:
+                        filtered_opportunities.append(o)
+                logger.info(f"Exchange filter - Opportunities involving selected exchange: {len(filtered_opportunities)}")
+            else:
+                # Multiple exchanges: show only opportunities between selected exchanges
+                for o in opportunities:
+                    long_ex = o.get('long_exchange')
+                    short_ex = o.get('short_exchange')
+                    if long_ex in normalized_exchanges and short_ex in normalized_exchanges:
+                        filtered_opportunities.append(o)
+                logger.info(f"Exchange filter - Opportunities BETWEEN selected exchanges: {len(filtered_opportunities)}")
             if len(filtered_opportunities) > 0:
                 logger.info(f"Exchange filter - Sample result: {filtered_opportunities[0].get('long_exchange')} <-> {filtered_opportunities[0].get('short_exchange')}")
             opportunities = filtered_opportunities

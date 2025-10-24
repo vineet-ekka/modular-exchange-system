@@ -53,11 +53,21 @@ export const loadFilterState = (): ExchangeFilterState => {
     const savedCrossListed = localStorage.getItem(STORAGE_KEYS.SHOW_ONLY_CROSSLISTED);
     const savedHighlightMissing = localStorage.getItem(STORAGE_KEYS.HIGHLIGHT_MISSING);
 
+    let selectedExchanges = DEFAULT_FILTER_STATE.selectedExchanges;
+
+    if (savedExchanges) {
+      const parsed = JSON.parse(savedExchanges) as string[];
+      const savedSet = new Set<string>(parsed.map(ex => ex.toLowerCase()));
+      const mergedSet = new Set<string>([...savedSet, ...ALL_EXCHANGES]);
+      selectedExchanges = mergedSet;
+      console.log('[FILTER] Merged exchanges from localStorage:', selectedExchanges.size, 'exchanges:', [...selectedExchanges].sort());
+    } else {
+      console.log('[FILTER] No saved exchanges, using default:', selectedExchanges.size, 'exchanges:', [...selectedExchanges].sort());
+    }
+
     return {
       ...DEFAULT_FILTER_STATE,
-      selectedExchanges: savedExchanges
-        ? new Set(JSON.parse(savedExchanges))
-        : DEFAULT_FILTER_STATE.selectedExchanges,
+      selectedExchanges,
       filterExpanded: savedCollapsed === 'true',
       hideEmptyAssets: savedHideEmpty === 'true',
       showOnlyCrossListed: savedCrossListed === 'true',

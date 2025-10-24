@@ -932,8 +932,8 @@ async def get_funding_rates_grid():
                     -- Filter out inactive contracts and stale data
                     AND (cm.is_active = true OR cm.is_active IS NULL)
                     AND ed.last_updated > NOW() - INTERVAL %s
-                    -- 60-second recency filter for extreme rate selection
-                    AND ed.last_updated > NOW() - INTERVAL '60 seconds'
+                    -- 5-minute recency filter for extreme rate selection
+                    AND ed.last_updated > NOW() - INTERVAL '5 minutes'
                 ORDER BY COALESCE(ed.base_asset, ed.symbol), ed.exchange,
                          ABS(ed.funding_rate) DESC NULLS LAST,
                          ed.last_updated DESC

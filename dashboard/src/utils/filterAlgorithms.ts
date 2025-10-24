@@ -4,7 +4,11 @@ export const getVisibleExchanges = (
   allExchanges: string[],
   selectedExchanges: Set<string>
 ): string[] => {
-  return allExchanges.filter(ex => selectedExchanges.has(ex));
+  const visible = allExchanges.filter(ex => selectedExchanges.has(ex));
+  console.log('[VISIBLE] allExchanges:', allExchanges.length, allExchanges);
+  console.log('[VISIBLE] selectedExchanges:', selectedExchanges.size, [...selectedExchanges].sort());
+  console.log('[VISIBLE] visibleExchanges:', visible.length, visible);
+  return visible;
 };
 
 export const filterAssetsByEmptyData = (

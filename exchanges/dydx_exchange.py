@@ -48,7 +48,15 @@ class DydxExchange(BaseExchange):
                 if market_data.get('status') == 'ACTIVE':
                     # Extract base and quote assets from ticker (e.g., "BTC-USD" -> "BTC", "USD")
                     ticker_parts = ticker.split('-')
-                    base_asset = ticker_parts[0] if len(ticker_parts) > 0 else ''
+                    base_part = ticker_parts[0] if len(ticker_parts) > 0 else ''
+
+                    # For Solana/DEX tokens with format "TOKEN,DEX,MINT_ADDRESS", extract just TOKEN
+                    # Example: "FARTCOIN,RAYDIUM,9BB6..." -> "FARTCOIN"
+                    if ',' in base_part:
+                        base_asset = base_part.split(',')[0]
+                    else:
+                        base_asset = base_part
+
                     quote_asset = ticker_parts[1] if len(ticker_parts) > 1 else ''
                     
                     markets_list.append({
