@@ -278,8 +278,8 @@ async def performance_health():
         # Get Z-score calculation performance from last run
         cur.execute("""
             SELECT 
-                MAX(calculated_at) as last_calc,
-                EXTRACT(EPOCH FROM (NOW() - MAX(calculated_at))) as seconds_ago,
+                MAX(last_updated) as last_calc,
+                EXTRACT(EPOCH FROM (NOW() - MAX(last_updated))) as seconds_ago,
                 COUNT(*) as total_contracts,
                 COUNT(CASE WHEN ABS(current_z_score) > 2 THEN 1 END) as extreme_contracts
             FROM funding_statistics

@@ -29,7 +29,7 @@ const LiveFundingTicker: React.FC<LiveFundingTickerProps> = ({ asset, selectedCo
       if (selectedContract) {
         // Try to fetch specific contract data
         // First, fetch all funding rates and filter for the specific contract
-        const allDataResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=100`);
+        const allDataResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=2000`);
         if (allDataResponse.ok) {
           const allData = await allDataResponse.json();
           // Find the specific contract

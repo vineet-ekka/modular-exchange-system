@@ -209,6 +209,17 @@ class PostgresManager:
         """
         import psycopg2
         return psycopg2.connect(**self.config)
+    
+    def return_connection(self, conn):
+        """
+        Return a database connection (close it).
+        For compatibility with modules expecting return_connection().
+        """
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                self.logger.warning(f"Error closing connection: {e}")
 
     def test_connection(self) -> bool:
         """

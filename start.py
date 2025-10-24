@@ -80,17 +80,45 @@ def print_status(message, status="info"):
 
 def check_command(command):
     """Check if a command is available."""
-    return shutil.which(command) is not None
+    # First try the normal PATH
+    if shutil.which(command) is not None:
+        return True
+    
+    # For node/npm, try to source NVM
+    if command in ["node", "npm"]:
+        try:
+            # Source NVM and check again
+            nvm_dir = os.path.expanduser("~/.nvm")
+            nvm_script = os.path.join(nvm_dir, "nvm.sh")
+            if os.path.exists(nvm_script):
+                # Set up NVM environment
+                os.environ["NVM_DIR"] = nvm_dir
+                # Try to find node in NVM directory
+                nvm_versions = os.path.join(nvm_dir, "versions", "node")
+                if os.path.exists(nvm_versions):
+                    for version_dir in os.listdir(nvm_versions):
+                        version_path = os.path.join(nvm_versions, version_dir)
+                        if os.path.isdir(version_path):
+                            bin_path = os.path.join(version_path, "bin", command)
+                            if os.path.exists(bin_path):
+                                return True
+        except:
+            pass
+    
+    return False
 
 def check_prerequisites():
     """Check if all required tools are installed."""
     print_status("Checking prerequisites...", "info")
     
     prerequisites = {
-        "python": "Python is required. Download from https://python.org",
-        "node": "Node.js is required. Download from https://nodejs.org",
-        "npm": "npm is required. Comes with Node.js",
+        "python3": "Python is required. Download from https://python.org",
         "docker": "Docker is required. Download from https://docker.com"
+    }
+    
+    optional_prerequisites = {
+        "node": "Node.js is required for the React dashboard. Download from https://nodejs.org",
+        "npm": "npm is required for the React dashboard. Comes with Node.js"
     }
     
     all_ok = True
@@ -100,6 +128,13 @@ def check_prerequisites():
         else:
             print_status(f"{cmd.capitalize()} not found. {message}", "error")
             all_ok = False
+    
+    # Check optional prerequisites
+    for cmd, message in optional_prerequisites.items():
+        if check_command(cmd):
+            print_status(f"{cmd.capitalize()} found", "success")
+        else:
+            print_status(f"{cmd.capitalize()} not found. {message}", "warning")
     
     return all_ok
 
@@ -147,7 +182,7 @@ def start_postgres():
     try:
         print("   Starting PostgreSQL container...")
         subprocess.run(
-            ["docker-compose", "up", "-d", "postgres"],
+            ["docker", "compose", "up", "-d", "postgres"],
             check=True,
             shell=True,
             capture_output=True
@@ -186,7 +221,7 @@ def start_redis():
     try:
         print("   Starting Redis container...")
         subprocess.run(
-            ["docker-compose", "up", "-d", "redis"],
+            ["docker", "compose", "up", "-d", "redis"],
             check=True,
             shell=True,
             capture_output=True
@@ -208,8 +243,31 @@ def start_redis():
         print_status("The system will continue without Redis caching", "warning")
         return True  # Don't fail the entire startup if Redis fails
 
+def get_npm_command():
+    """Get the npm command with NVM sourced if needed."""
+    if shutil.which("npm") is not None:
+        return "npm"
+    
+    # Try to find npm in NVM
+    nvm_dir = os.path.expanduser("~/.nvm")
+    nvm_versions = os.path.join(nvm_dir, "versions", "node")
+    if os.path.exists(nvm_versions):
+        for version_dir in os.listdir(nvm_versions):
+            version_path = os.path.join(nvm_versions, version_dir)
+            if os.path.isdir(version_path):
+                npm_path = os.path.join(version_path, "bin", "npm")
+                if os.path.exists(npm_path):
+                    return npm_path
+    
+    return None
+
 def check_npm_dependencies():
     """Check if npm dependencies are installed."""
+    npm_cmd = get_npm_command()
+    if not npm_cmd:
+        print_status("NPM not available - skipping React dashboard setup", "warning")
+        return False
+        
     dashboard_path = Path("dashboard")
     node_modules = dashboard_path / "node_modules"
     package_json = dashboard_path / "package.json"
@@ -224,7 +282,7 @@ def check_npm_dependencies():
         
         try:
             subprocess.run(
-                ["npm", "install"],
+                [npm_cmd, "install"],
                 cwd=dashboard_path,
                 check=True,
                 shell=True
@@ -256,13 +314,13 @@ def start_api_server():
         # Start API server in background
         if sys.platform == "win32":
             subprocess.Popen(
-                [sys.executable, "api.py"],
+                ["python3", "api.py"],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=Path.cwd()
             )
         else:
             subprocess.Popen(
-                [sys.executable, "api.py"],
+                ["python3", "api.py"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 cwd=Path.cwd()
@@ -285,6 +343,11 @@ def start_api_server():
 
 def start_react_dashboard():
     """Start the React frontend."""
+    npm_cmd = get_npm_command()
+    if not npm_cmd:
+        print_status("NPM not available - skipping React dashboard", "warning")
+        return False
+        
     print_status("Starting React dashboard...", "info")
     
     if is_port_in_use(3000):
@@ -297,14 +360,14 @@ def start_react_dashboard():
         # Start React app in background
         if sys.platform == "win32":
             subprocess.Popen(
-                ["npm", "start"],
+                [npm_cmd, "start"],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=dashboard_path,
                 shell=True
             )
         else:
             subprocess.Popen(
-                ["npm", "start"],
+                [npm_cmd, "start"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 cwd=dashboard_path,
@@ -331,7 +394,7 @@ def start_data_collector(quiet=True):
 
     try:
         # Use 30-second intervals for real-time updates
-        cmd = [sys.executable, "main.py", "--loop", "--interval", "30"]
+        cmd = ["python3", "main.py", "--loop", "--interval", "30"]
         if quiet:
             cmd.append("--quiet")
 
@@ -372,12 +435,12 @@ def start_data_collector(quiet=True):
             return True
         else:
             print_status("Data collector failed to start. Check data_collector.log for details", "warning")
-            print("   You can start it manually with: python main.py --loop --interval 30")
+            print("   You can start it manually with: python3 main.py --loop --interval 30")
             return False
 
     except Exception as e:
         print_status(f"Failed to start data collector: {e}", "warning")
-        print("   You can start it manually later with: python main.py --loop --interval 30")
+        print("   You can start it manually later with: python3 main.py --loop --interval 30")
         return False
 
 def backfill_arbitrage_spreads():
@@ -396,7 +459,7 @@ def backfill_arbitrage_spreads():
         # Run the backfill script (synchronously to ensure data is ready)
         print_status("Populating 30-day spread history...", "info")
         result = subprocess.run(
-            [sys.executable, str(backfill_script), "--days", "30"],
+            ["python3", str(backfill_script), "--days", "30"],
             capture_output=True,
             text=True,
             timeout=60  # Give it up to 60 seconds
@@ -434,7 +497,7 @@ def start_spread_collector():
         if sys.platform == "win32":
             with open(log_file, "w") as log:
                 process = subprocess.Popen(
-                    [sys.executable, str(spread_script)],
+                    ["python3", str(spread_script)],
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=Path.cwd(),
@@ -443,7 +506,7 @@ def start_spread_collector():
         else:
             with open(log_file, "w") as log:
                 process = subprocess.Popen(
-                    [sys.executable, str(spread_script)],
+                    ["python3", str(spread_script)],
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=Path.cwd()
@@ -482,7 +545,7 @@ def start_zscore_calculator():
         if sys.platform == "win32":
             with open(log_file, "w") as log:
                 process = subprocess.Popen(
-                    [sys.executable, str(zscore_script)],
+                    ["python3", str(zscore_script)],
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=Path.cwd(),
@@ -491,7 +554,7 @@ def start_zscore_calculator():
         else:
             with open(log_file, "w") as log:
                 process = subprocess.Popen(
-                    [sys.executable, str(zscore_script)],
+                    ["python3", str(zscore_script)],
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     cwd=Path.cwd()
@@ -536,7 +599,7 @@ def start_background_historical_backfill():
                 backfill_script = Path("scripts/unified_historical_backfill.py")
                 if backfill_script.exists():
                     result = subprocess.run(
-                        [sys.executable, str(backfill_script), "--days", "30"],
+                        ["python3", str(backfill_script), "--days", "30"],
                         capture_output=True,
                         text=True,
                         cwd=Path.cwd()
@@ -544,7 +607,7 @@ def start_background_historical_backfill():
                 else:
                     # Fallback to old name if it exists
                     result = subprocess.run(
-                        [sys.executable, "run_backfill.py", "--days", "30"],
+                        ["python3", "run_backfill.py", "--days", "30"],
                         capture_output=True,
                         text=True,
                         cwd=Path.cwd()
@@ -579,13 +642,16 @@ def open_dashboard():
     time.sleep(2)
     webbrowser.open("http://localhost:3000")
 
-def print_summary(collector_running=True, spread_collector_running=False, zscore_running=False):
+def print_summary(collector_running=True, spread_collector_running=False, zscore_running=False, dashboard_running=False):
     """Print summary of running services."""
     print("\n" + "="*60, flush=True)
-    print(f"{Colors.BOLD}DASHBOARD READY!{Colors.RESET}", flush=True)
+    print(f"{Colors.BOLD}EXCHANGE SYSTEM READY!{Colors.RESET}", flush=True)
     print("="*60, flush=True)
     print(f"\n{Colors.GREEN}Services running:{Colors.RESET}", flush=True)
-    print(f"  Dashboard:  {Colors.BLUE}http://localhost:3000{Colors.RESET}", flush=True)
+    if dashboard_running:
+        print(f"  Dashboard:  {Colors.BLUE}http://localhost:3000{Colors.RESET}", flush=True)
+    else:
+        print(f"  Dashboard:  {Colors.YELLOW}Not available (Node.js required){Colors.RESET}", flush=True)
     print(f"  API Server: {Colors.BLUE}http://localhost:8000{Colors.RESET}", flush=True)
     print(f"  API Docs:   {Colors.BLUE}http://localhost:8000/docs{Colors.RESET}", flush=True)
     print(f"  PostgreSQL: localhost:5432", flush=True)
@@ -598,7 +664,7 @@ def print_summary(collector_running=True, spread_collector_running=False, zscore
         print(f"  Real-time collector: Every 30 seconds (check data_collector.log)", flush=True)
     else:
         print(f"  Real-time collector: {Colors.YELLOW}Not running - start manually with:{Colors.RESET}", flush=True)
-        print(f"    python main.py --loop --interval 30", flush=True)
+        print(f"    python3 main.py --loop --interval 30", flush=True)
     if spread_collector_running:
         print(f"  Spread collector: Continuously updating arbitrage spreads", flush=True)
     if zscore_running:
@@ -637,37 +703,32 @@ def main():
     
     print()  # Empty line for spacing
     
-    # Step 4: Check/install npm dependencies
-    if not check_npm_dependencies():
-        print_status("\nFailed to set up dashboard dependencies.", "error")
-        sys.exit(1)
+    # Step 4: Check/install npm dependencies (optional)
+    npm_available = check_npm_dependencies()
     
     print()  # Empty line for spacing
     
-    # Step 4: Start API server
+    # Step 5: Start API server
     if not start_api_server():
         print_status("\nFailed to start API server.", "error")
         sys.exit(1)
     
     print()  # Empty line for spacing
     
-    # Step 5: Start React dashboard
-    if not start_react_dashboard():
-        print_status("\nFailed to start React dashboard.", "error")
-        sys.exit(1)
+    # Step 6: Start React dashboard (optional)
+    dashboard_started = start_react_dashboard()
     
     print()  # Empty line for spacing
     
-    # Step 6: Start data collector (optional, don't fail if it doesn't work)
+    # Step 7: Start data collector (optional, don't fail if it doesn't work)
     collector_started = start_data_collector(quiet=True)
 
     print()  # Empty line for spacing
 
-    # Step 7: Backfill historical arbitrage spreads 
+    # Step 8: Backfill historical arbitrage spreads 
     backfill_arbitrage_spreads()
 
     print()  # Empty line for spacing
-
 
     # Step 9: Start spread collector for ongoing updates
     spread_collector_started = start_spread_collector()
@@ -684,14 +745,16 @@ def main():
 
     print()  # Empty line for spacing
 
-    # Step 12: Open browser
-    open_dashboard()
+    # Step 12: Open browser (only if dashboard is running)
+    if dashboard_started:
+        open_dashboard()
 
     # Step 13: Show summary
     print_summary(
         collector_running=collector_started,
         spread_collector_running=spread_collector_started,
-        zscore_running=zscore_started
+        zscore_running=zscore_started,
+        dashboard_running=dashboard_started
     )
     
     # Keep running until Ctrl+C

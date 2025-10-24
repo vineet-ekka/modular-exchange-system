@@ -21,7 +21,7 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "exchange_data")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres123")
 
 # Database table name where data will be stored
 DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
@@ -39,7 +39,15 @@ EXCHANGES = {
     'aster': True,        # Enabled - Aster DEX perpetual contracts (OPTIMIZED)
     'lighter': True,      # Enabled - Lighter blockchain perpetual contracts
     'bybit': True,        # Enabled - 696 perpetual contracts (668 linear + 28 inverse)
-    'deribit': False,     # Ready but disabled
+    'pacifica': True,     # Enabled - Pacifica Finance perpetual contracts
+    'paradex': True,      # Enabled - Paradex perpetual contracts (Starknet DEX)
+    'hibachi': True,      # Enabled - Hibachi DEX perpetual contracts
+    'orderly': True,      # Enabled - Orderly Network perpetual contracts
+    'deribit': True,      # Enabled - Deribit perpetual contracts
+    'mexc': True,         # Enabled - MEXC perpetual contracts
+    'dydx': True,         # Enabled - dYdX v4 perpetual contracts
+    'edgex': False,       # Disabled - EdgeX API not accessible
+    'apex': False,        # Disabled - ApeX API not accessible
     'kraken': False       # Ready but disabled
 }
 

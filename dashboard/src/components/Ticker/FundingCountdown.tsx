@@ -26,7 +26,7 @@ const FundingCountdown: React.FC<FundingCountdownProps> = ({ asset, selectedCont
       // If we have a specific contract selected, fetch data for that contract
       if (selectedContract) {
         // Fetch all funding rates and filter for the specific contract
-        const allDataResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=100`);
+        const allDataResponse = await fetch(`http://localhost:8000/api/funding-rates?base_asset=${asset}&limit=2000`);
         if (allDataResponse.ok) {
           const allData = await allDataResponse.json();
           // Find the specific contract

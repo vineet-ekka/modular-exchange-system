@@ -21,7 +21,15 @@ from .drift_exchange import DriftExchange
 from .aster_exchange import AsterExchange
 from .lighter_exchange import LighterExchange
 from .bybit_exchange import ByBitExchange
-# from .deribit_exchange import DeribitExchange  # Not implemented yet
+from .pacifica_exchange import PacificaExchange
+from .paradex_exchange import ParadexExchange
+from .hibachi_exchange import HibachiExchange
+from .orderly_exchange import OrderlyExchange
+from .deribit_exchange import DeribitExchange
+from .mexc_exchange import MexcExchange
+from .dydx_exchange import DydxExchange
+from .edgex_exchange import EdgexExchange
+from .apex_exchange import ApexExchange
 # from .kraken_exchange import KrakenExchange  # Not implemented yet
 
 
@@ -86,7 +94,15 @@ class ExchangeFactory:
             'aster': AsterExchange,
             'lighter': LighterExchange,
             'bybit': ByBitExchange,
-            # 'deribit': DeribitExchange,  # Not implemented yet
+            'pacifica': PacificaExchange,
+            'paradex': ParadexExchange,
+            'hibachi': HibachiExchange,
+            'orderly': OrderlyExchange,
+            'deribit': DeribitExchange,
+            'mexc': MexcExchange,
+            'dydx': DydxExchange,
+            'edgex': EdgexExchange,
+            'apex': ApexExchange,
             # 'kraken': KrakenExchange,  # Not implemented yet
             # Add new exchanges here as they become available
             # 'new_exchange': NewExchangeClass,
@@ -179,9 +195,9 @@ class ExchangeFactory:
                                        exchange, batch_id, batch_timestamp)
                 future_to_exchange[future] = exchange
 
-            # Collect results as they complete with timeout (increased to 120s for slow exchanges like Aster)
+            # Collect results as they complete with timeout (increased to 300s for slow exchanges like MEXC)
             try:
-                for future in as_completed(future_to_exchange, timeout=120):
+                for future in as_completed(future_to_exchange, timeout=300):
                     exchange = future_to_exchange[future]
                     try:
                         data, duration_ms = future.result(timeout=60)

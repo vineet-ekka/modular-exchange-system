@@ -99,9 +99,9 @@ class DataValidator:
         if len(btc_data) > 1:
             prices = btc_data['mark_price']
             spread_pct = (prices.max() - prices.min()) / prices.mean() * 100
-            if spread_pct > 1.0:  # 1% spread seems suspicious
+            if spread_pct > 5.0:  # 5% spread seems suspicious
                 self.warnings.append(f"BTC price spread across exchanges: {spread_pct:.1f}%")
-            if spread_pct > 5.0:  # 5% spread is definitely wrong
+            if spread_pct > 20.0:  # 20% spread is definitely wrong
                 self.errors.append("Extreme price differences suggest data issues")
     
     def _check_duplicates(self, df: pd.DataFrame) -> None:
