@@ -5,6 +5,7 @@ import { fetchContractsByAsset, ContractDetails } from '../../services/api';
 import { useExchangeFilter } from '../../hooks/useExchangeFilter';
 import { ExchangeFilterPanel } from './ExchangeFilter';
 import { AssetGridData as ImportedAssetGridData } from '../../types/exchangeFilter';
+import { ContractLink } from '../ContractLink';
 
 interface ExchangeRate {
   funding_rate: number | null;
@@ -574,8 +575,17 @@ const AssetFundingGrid: React.FC = () => {
                                       )}>
                                       <td className={clsx(
                                         "px-3 py-2 font-medium",
-                                        isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"
-                                      )}>{contract.symbol}</td>
+                                        isContractMatch && "text-blue-700 font-semibold"
+                                      )}>
+                                        <ContractLink
+                                          exchange={contract.exchange}
+                                          symbol={contract.symbol}
+                                          baseAsset={contract.base_asset}
+                                          isActive={true}
+                                          hoursSinceUpdate={0}
+                                          className={isContractMatch ? "text-blue-700 font-semibold" : "text-gray-900"}
+                                        />
+                                      </td>
                                       <td className="px-3 py-2 text-gray-700">{contract.exchange}</td>
                                       <td className="px-3 py-2 text-gray-700">{contract.base_asset}</td>
                                       <td className="px-3 py-2 text-gray-700">{contract.quote_asset}</td>
