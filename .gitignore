@@ -65,6 +65,10 @@ venv.bak/
 *.swo
 *~
 
+# Claude Code local settings
+.claude/
+CLAUDE.md
+
 # OS
 .DS_Store
 Thumbs.db
@@ -77,6 +81,20 @@ historical-exchange-data.csv
 nul
 test_*.html
 *_test.html
+
+# Runtime metrics and test files
+.collection_metrics.json
+test_*.py
+check_*.py
+
+# Design mockups
+shadcn_mockup*.html
+
+# Accidental pip output
+=*
+
+# Config backups (may contain sensitive data)
+config/backups/
 
 # Logs
 logs/
