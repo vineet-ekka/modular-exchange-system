@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import uuid
 import logging
+import json
+from pathlib import Path
 from .base_exchange import BaseExchange
+from utils.redis_cache import RedisCache
 from .backpack_exchange import BackpackExchange
 from .binance_exchange import BinanceExchange
 from .kucoin_exchange import KuCoinExchange
@@ -22,9 +25,7 @@ from .aster_exchange import AsterExchange
 from .lighter_exchange import LighterExchange
 from .bybit_exchange import ByBitExchange
 from .pacifica_exchange import PacificaExchange
-from .paradex_exchange import ParadexExchange
 from .hibachi_exchange import HibachiExchange
-from .orderly_exchange import OrderlyExchange
 from .deribit_exchange import DeribitExchange
 from .mexc_exchange import MexcExchange
 from .dydx_exchange import DydxExchange
@@ -52,30 +53,16 @@ class ExchangeFactory:
         # Setup logging
         self.logger = logging.getLogger(__name__)
 
-        # Import settings for sequential collection
-        try:
-            from config.settings import ENABLE_SEQUENTIAL_COLLECTION, EXCHANGE_COLLECTION_DELAY
-            self.sequential_mode = ENABLE_SEQUENTIAL_COLLECTION
-            self.exchange_delay = EXCHANGE_COLLECTION_DELAY
-        except ImportError:
-            self.sequential_mode = False
-            self.exchange_delay = 30
-
-        # Import sequential configuration if available
-        try:
-            from config.sequential_config import get_exchange_schedule, get_exchange_delay
-            self.get_exchange_schedule = get_exchange_schedule
-            self.get_exchange_delay = get_exchange_delay
-        except ImportError:
-            self.get_exchange_schedule = None
-            self.get_exchange_delay = None
-
-        # Store for sequential collection data
-        self.sequential_data: Dict[str, pd.DataFrame] = {}
-        self.collection_threads: List[threading.Thread] = []
-
         # Track collection metrics
         self.last_collection_metrics = {}
+
+        # Redis cache for metrics (with filesystem fallback for compatibility)
+        self.cache = RedisCache()
+        self.metrics_cache_key = 'collection:metrics'
+        self.metrics_cache_ttl = 60  # 60 seconds TTL
+
+        # Metrics file path (fallback for legacy compatibility)
+        self.metrics_file = Path(__file__).parent.parent / '.collection_metrics.json'
     
     def _create_exchanges(self, settings: Dict[str, bool]):
         """
@@ -95,9 +82,7 @@ class ExchangeFactory:
             'lighter': LighterExchange,
             'bybit': ByBitExchange,
             'pacifica': PacificaExchange,
-            'paradex': ParadexExchange,
             'hibachi': HibachiExchange,
-            'orderly': OrderlyExchange,
             'deribit': DeribitExchange,
             'mexc': MexcExchange,
             'dydx': DydxExchange,
@@ -148,16 +133,12 @@ class ExchangeFactory:
     
     def process_all_exchanges(self) -> pd.DataFrame:
         """
-        Process data from all enabled exchanges.
-        Uses sequential mode if enabled to stagger API calls.
-        
+        Process data from all enabled exchanges in parallel.
+
         Returns:
             Combined DataFrame from all exchanges
         """
-        if self.sequential_mode:
-            return self._process_exchanges_sequential()
-        else:
-            return self._process_exchanges_parallel()
+        return self._process_exchanges_parallel()
     
     def _process_exchanges_parallel(self) -> pd.DataFrame:
         """
@@ -250,6 +231,9 @@ class ExchangeFactory:
         collection_duration = (time.time() - collection_start) * 1000
         self.last_collection_metrics['total_duration_ms'] = collection_duration
 
+        # Save metrics to file for API access
+        self._save_metrics_to_file()
+
         # Combine all data
         if all_data:
             combined_df = pd.concat(all_data, ignore_index=True)
@@ -295,100 +279,6 @@ class ExchangeFactory:
             duration_ms = (time.time() - start_time) * 1000
             self.logger.error(f"Error collecting from {exchange.name}: {e}")
             raise
-    
-    def _process_exchanges_sequential(self) -> pd.DataFrame:
-        """
-        Process exchanges sequentially with delays to reduce API load.
-        Uses configured schedule if available, otherwise uses default delays.
-        
-        Returns:
-            Combined DataFrame from all exchanges
-        """
-        # Clear previous data
-        self.sequential_data.clear()
-        self.collection_threads.clear()
-        
-        enabled_exchanges = self.get_enabled_exchanges()
-        
-        # Use configured schedule if available
-        if self.get_exchange_delay:
-            print(f"\n[Sequential Mode] Using configured schedule")
-            exchange_delays = {}
-            for exchange in enabled_exchanges:
-                delay = self.get_exchange_delay(exchange.name)
-                if delay is not None:
-                    exchange_delays[exchange.name] = delay
-                else:
-                    # Fallback: use index-based delay for unconfigured exchanges
-                    idx = len(exchange_delays)
-                    exchange_delays[exchange.name] = idx * self.exchange_delay
-        else:
-            print(f"\n[Sequential Mode] Processing exchanges with {self.exchange_delay}s delay between each")
-            exchange_delays = {
-                exchange.name: idx * self.exchange_delay 
-                for idx, exchange in enumerate(enabled_exchanges)
-            }
-        
-        # Start collection threads with delays
-        for exchange in enabled_exchanges:
-            delay = exchange_delays[exchange.name]
-            thread = threading.Thread(
-                target=self._collect_exchange_data_delayed,
-                args=(exchange, delay),
-                name=f"Collector-{exchange.name}"
-            )
-            thread.start()
-            self.collection_threads.append(thread)
-            
-            if delay > 0:
-                print(f"  • {exchange.name}: scheduled for {delay}s from now")
-            else:
-                print(f"  • {exchange.name}: starting immediately")
-        
-        # Wait for all threads to complete
-        for thread in self.collection_threads:
-            thread.join()
-        
-        # Combine all collected data
-        all_data = []
-        for exchange_name, data in self.sequential_data.items():
-            if not data.empty:
-                all_data.append(data)
-        
-        if all_data:
-            combined_df = pd.concat(all_data, ignore_index=True)
-            combined_df = combined_df.sort_values(['exchange', 'symbol'])
-            combined_df = combined_df.reset_index(drop=True)
-            
-            print(f"\n[Sequential Mode] Collection complete: {len(combined_df)} total contracts")
-            return combined_df
-        else:
-            return self._get_empty_dataframe()
-    
-    def _collect_exchange_data_delayed(self, exchange: BaseExchange, delay: float):
-        """
-        Collect data from an exchange after a specified delay.
-        
-        Args:
-            exchange: Exchange instance to collect from
-            delay: Seconds to wait before collection
-        """
-        if delay > 0:
-            time.sleep(delay)
-        
-        timestamp = datetime.now(timezone.utc).strftime('%H:%M:%S')
-        print(f"  [{timestamp}] Starting {exchange.name} collection...")
-        
-        try:
-            data = exchange.process_data()
-            if not data.empty:
-                self.sequential_data[exchange.name] = data
-                print(f"  [{timestamp}] {exchange.name}: collected {len(data)} contracts")
-            else:
-                print(f"  [{timestamp}] {exchange.name}: no data retrieved")
-        except Exception as e:
-            print(f"  [{timestamp}] {exchange.name}: ERROR - {str(e)}")
-            self.sequential_data[exchange.name] = pd.DataFrame()
     
     def _get_empty_dataframe(self) -> pd.DataFrame:
         """
@@ -438,6 +328,39 @@ class ExchangeFactory:
         """
         return self.last_collection_metrics
 
+    def _save_metrics_to_file(self):
+        """
+        Save collection metrics to Redis cache (primary) and filesystem (fallback).
+        Redis provides fast IPC, filesystem provides backward compatibility.
+        """
+        try:
+            if not self.last_collection_metrics:
+                return
+
+            metrics_to_save = self.last_collection_metrics.copy()
+
+            if 'batch_timestamp' in metrics_to_save and isinstance(metrics_to_save['batch_timestamp'], datetime):
+                metrics_to_save['batch_timestamp'] = metrics_to_save['batch_timestamp'].isoformat()
+
+            for exchange_name, exchange_metrics in metrics_to_save.get('exchanges', {}).items():
+                if 'last_updated' in exchange_metrics and isinstance(exchange_metrics['last_updated'], datetime):
+                    exchange_metrics['last_updated'] = exchange_metrics['last_updated'].isoformat()
+
+            redis_success = self.cache.set(
+                self.metrics_cache_key,
+                metrics_to_save,
+                ttl_seconds=self.metrics_cache_ttl
+            )
+
+            if not redis_success:
+                self.logger.debug("Redis cache unavailable, falling back to filesystem")
+
+            with open(self.metrics_file, 'w') as f:
+                json.dump(metrics_to_save, f, indent=2)
+
+        except Exception as e:
+            self.logger.error(f"Failed to save metrics: {e}")
+
     def print_collection_summary(self):
         """
         Print a formatted summary of the last collection metrics.
@@ -447,18 +370,74 @@ class ExchangeFactory:
             return
 
         metrics = self.last_collection_metrics
-        print("\n" + "="*60)
-        print("COLLECTION PERFORMANCE SUMMARY")
-        print("="*60)
-        print(f"Batch ID: {metrics.get('batch_id', 'N/A')}")
-        print(f"Timestamp: {metrics.get('batch_timestamp', 'N/A')}")
-        print(f"Total Duration: {metrics.get('total_duration_ms', 0):.0f}ms")
-        print(f"Success Rate: {metrics.get('success_count', 0)}/{len(metrics.get('exchanges', {}))}")
-        print("\nExchange Details:")
-        print("-"*40)
+        total_duration = metrics.get('total_duration_ms', 0)
+        total_exchanges = len(metrics.get('exchanges', {}))
+        success_count = metrics.get('success_count', 0)
+        failure_count = metrics.get('failure_count', 0)
+        total_contracts = sum(ex.get('record_count', 0) for ex in metrics.get('exchanges', {}).values())
 
+        print("\n" + "="*80)
+        print(" DATA COLLECTION TIMING SUMMARY ".center(80, "="))
+        print("="*80)
+
+        print(f"\n OVERALL PERFORMANCE:")
+        print(f"   Total Duration:    {total_duration:>10.0f} ms  ({total_duration/1000:.2f} seconds)")
+        print(f"   Total Contracts:   {total_contracts:>10,} contracts")
+        print(f"   Exchange Success:  {success_count:>10} / {total_exchanges} exchanges")
+        if failure_count > 0:
+            print(f"   Exchange Failures: {failure_count:>10} exchanges")
+
+        print(f"\n BATCH INFO:")
+        print(f"   Batch ID:          {metrics.get('batch_id', 'N/A')}")
+        timestamp = metrics.get('batch_timestamp', 'N/A')
+        if timestamp != 'N/A':
+            print(f"   Timestamp:         {timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} UTC")
+
+        print(f"\n EXCHANGE BREAKDOWN (sorted by duration):")
+        print(f"   {'Exchange':<15} {'Status':<10} {'Duration':<15} {'Contracts':<12} {'Speed':<15}")
+        print(f"   {'-'*15} {'-'*10} {'-'*15} {'-'*12} {'-'*15}")
+
+        exchange_list = []
         for exchange_name, exchange_metrics in metrics.get('exchanges', {}).items():
-            status_icon = "[OK]" if exchange_metrics['status'] == 'success' else "[X]"
-            print(f"{status_icon} {exchange_name:15} {exchange_metrics['duration_ms']:>8.0f}ms   {exchange_metrics['record_count']:>4} records")
+            exchange_list.append((exchange_name, exchange_metrics))
 
-        print("="*60) 
+        exchange_list.sort(key=lambda x: x[1].get('duration_ms', 0), reverse=True)
+
+        for exchange_name, exchange_metrics in exchange_list:
+            duration_ms = exchange_metrics.get('duration_ms', 0)
+            record_count = exchange_metrics.get('record_count', 0)
+            status = exchange_metrics.get('status', 'unknown')
+
+            if status == 'success':
+                status_display = "[OK]"
+                duration_display = f"{duration_ms:.0f} ms"
+                if duration_ms >= 5000:
+                    duration_display += " [SLOW]"
+                contracts_display = f"{record_count:,}"
+                if record_count > 0 and duration_ms > 0:
+                    speed = (record_count / duration_ms) * 1000
+                    speed_display = f"{speed:.1f} c/s"
+                else:
+                    speed_display = "N/A"
+            elif status == 'timeout':
+                status_display = "[TIMEOUT]"
+                duration_display = f"{duration_ms:.0f} ms"
+                contracts_display = "0"
+                speed_display = "N/A"
+            else:
+                status_display = "[ERROR]"
+                duration_display = "N/A"
+                contracts_display = "0"
+                speed_display = "N/A"
+                if 'error' in exchange_metrics:
+                    error_msg = exchange_metrics['error'][:30]
+                    print(f"   {exchange_name:<15} {status_display:<10} Error: {error_msg}")
+                    continue
+
+            print(f"   {exchange_name:<15} {status_display:<10} {duration_display:<15} {contracts_display:<12} {speed_display:<15}")
+
+        if total_contracts > 0 and total_duration > 0:
+            overall_speed = (total_contracts / total_duration) * 1000
+            print(f"\n OVERALL SPEED: {overall_speed:.1f} contracts/second")
+
+        print("="*80 + "\n") 

@@ -251,19 +251,10 @@ class ExchangeDataSystem:
             RETURNING ed.exchange, ed.symbol
             """
 
-            # Use psycopg2 directly since db_manager doesn't have get_connection
-            import psycopg2
-            conn = psycopg2.connect(
-                host='localhost',
-                port=5432,
-                database='exchange_data',
-                user='postgres',
-                password='postgres123'
-            )
-            cursor = conn.cursor()
+            cursor = self.db_manager.cursor
             cursor.execute(query, (stale_threshold_hours,))
             removed = cursor.fetchall()
-            conn.commit()
+            self.db_manager.connection.commit()
 
             if removed:
                 print(f"- Removed {len(removed)} stale entries from inactive contracts")
@@ -285,13 +276,10 @@ class ExchangeDataSystem:
 
             cursor.execute(orphan_query, (stale_threshold_hours,))
             orphans = cursor.fetchall()
-            conn.commit()
+            self.db_manager.connection.commit()
 
             if orphans:
                 print(f"- Removed {len(orphans)} orphaned entries")
-
-            cursor.close()
-            conn.close()
 
             if not removed and not orphans:
                 print("OK No stale data to clean up")
@@ -337,47 +325,57 @@ class ExchangeDataSystem:
             print(f"! Historical cleanup error: {e}")
 
     def _check_data_completeness(self, force: bool = False):
-        """Check data completeness periodically and log warnings."""
-        # Only check every hour to avoid overhead
+        """
+        Check data completeness periodically and log warnings.
+
+        DISABLED BY DEFAULT - This check is optional and can be enabled by setting
+        ENABLE_COMPLETENESS_CHECK=True in settings. The default sample of 4 contracts
+        is not statistically significant for a system tracking 2,275+ contracts.
+
+        For comprehensive validation, use: python scripts/retry_incomplete_contracts.py
+        """
+        enable_check = getattr(self, 'enable_completeness_check', False)
+
+        if not enable_check:
+            return
+
         current_time = datetime.now(timezone.utc)
-        
+
         if not force and self.last_completeness_check:
             time_since_last_check = (current_time - self.last_completeness_check).total_seconds()
-            if time_since_last_check < 3600:  # Less than 1 hour
+            if time_since_last_check < 3600:
                 return
-        
+
         print("\n10. Checking data completeness...")
-        
+
         try:
-            # Quick validation for current contracts
             incomplete_count = 0
             low_completeness = []
-            
-            # Sample check - validate a few critical contracts
+
             sample_contracts = [
                 ('binance', 'BTCUSDT'),
                 ('binance', 'ETHUSDT'),
                 ('kucoin', 'XBTUSDTM'),
                 ('hyperliquid', 'BTC'),
             ]
-            
+
             for exchange, symbol in sample_contracts:
                 result = self.completeness_validator.validate_contract(exchange, symbol, days=30)
                 completeness = result.get('completeness_percentage', 0)
-                
+
                 if completeness < 95:
                     incomplete_count += 1
                     low_completeness.append(f"{exchange}:{symbol} ({completeness:.1f}%)")
-            
+
             if incomplete_count > 0:
                 self.logger.warning(f"Data completeness warning: {incomplete_count} contracts below 95% threshold")
                 print(f"! Data completeness warning: {', '.join(low_completeness)}")
                 print(f"  Run 'python scripts/retry_incomplete_contracts.py' to fix gaps")
             else:
                 print("OK Data completeness check passed")
-            
+
             self.last_completeness_check = current_time
-            
+
         except Exception as e:
             self.logger.error(f"Completeness check error: {e}")
             print(f"! Completeness check error: {e}")

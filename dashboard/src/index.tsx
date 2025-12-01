@@ -1,19 +1,25 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-
-console.log('Index.tsx is loading');
+import queryClient from './lib/queryClient';
 
 const rootElement = document.getElementById('root');
-console.log('Root element:', rootElement);
 
 if (rootElement) {
   const root = ReactDOM.createRoot(rootElement as HTMLElement);
-  console.log('Rendering App component');
   root.render(
-    <App />
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        {process.env.NODE_ENV === 'development' && (
+          <ReactQueryDevtools initialIsOpen={false} />
+        )}
+      </QueryClientProvider>
+    </React.StrictMode>
   );
 } else {
   console.error('Could not find root element');

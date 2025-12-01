@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
-import { ModernCard, ModernButton, ModernBadge } from '../components/Modern';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
 import { ContractArbitrageOpportunity } from '../services/arbitrage';
 import ArbitrageHistoricalChart from '../components/Charts/ArbitrageHistoricalChart';
 import clsx from 'clsx';
@@ -45,9 +47,9 @@ const ArbitrageDetailPage: React.FC = () => {
     return (
       <div className="flex flex-col items-center">
         <span className="text-xs text-text-tertiary mb-1">{label}</span>
-        <ModernBadge variant={variant} size="md">
+        <Badge variant={variant}>
           {zScore.toFixed(2)}
-        </ModernBadge>
+        </Badge>
       </div>
     );
   };
@@ -77,14 +79,14 @@ const ArbitrageDetailPage: React.FC = () => {
       <div className="min-h-screen bg-background">
         <Header />
         <div className="w-full px-2 py-6">
-          <ModernCard variant="default" padding="xl">
+          <Card className="bg-white border border-border shadow-sm p-8">
             <div className="text-center py-8">
               <p className="text-text-secondary mb-4">Opportunity data not found</p>
-              <ModernButton variant="primary" onClick={() => navigate('/arbitrage')}>
+              <Button variant="default" onClick={() => navigate('/arbitrage')}>
                 Back to Arbitrage Opportunities
-              </ModernButton>
+              </Button>
             </div>
-          </ModernCard>
+          </Card>
         </div>
       </div>
     );
@@ -98,13 +100,13 @@ const ArbitrageDetailPage: React.FC = () => {
       <div className="w-full px-2 py-6">
         {/* Back Button and Header */}
         <div className="mb-6">
-          <ModernButton
+          <Button
             variant="ghost"
             onClick={() => navigate('/arbitrage')}
             className="mb-4"
           >
-            ← Back to Opportunities
-          </ModernButton>
+            Back to Opportunities
+          </Button>
           <div>
             <h1 className="text-3xl font-bold text-text-primary mb-2">
               {opportunity.asset} Arbitrage Opportunity
@@ -117,7 +119,7 @@ const ArbitrageDetailPage: React.FC = () => {
 
         {/* Key Metrics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <ModernCard variant="elevated" padding="lg">
+          <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
             <div className="text-sm text-text-secondary mb-2">Funding Rate Spread</div>
             <div className="text-2xl font-bold text-success mb-1">
               {formatPercentageValue(opportunity.rate_spread_pct)}
@@ -125,9 +127,9 @@ const ArbitrageDetailPage: React.FC = () => {
             <div className="text-sm text-text-tertiary">
               Long: {formatPercentage(opportunity.long_rate)} | Short: {formatPercentage(opportunity.short_rate)}
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="elevated" padding="lg">
+          <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
             <div className="text-sm text-text-secondary mb-2">Funding Intervals</div>
             <div className="text-2xl font-bold text-text-primary mb-1">
               {opportunity.long_interval_hours}h / {opportunity.short_interval_hours}h
@@ -135,20 +137,20 @@ const ArbitrageDetailPage: React.FC = () => {
             <div className="text-sm text-text-tertiary">
               Sync Period: {opportunity.sync_period_hours}h
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="elevated" padding="lg">
+          <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
             <div className="text-sm text-text-secondary mb-2">Statistical Significance</div>
             <div className="flex justify-around mt-2">
               {getZScoreBadge(opportunity.spread_zscore, 'Spread')}
               {getZScoreBadge(opportunity.long_zscore, 'Long')}
               {getZScoreBadge(opportunity.short_zscore, 'Short')}
             </div>
-          </ModernCard>
+          </Card>
         </div>
 
         {/* Periodic Funding Returns - Compact Height */}
-        <ModernCard variant="elevated" padding="md" className="mb-6 border-2 border-primary">
+        <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-4 mb-6 border-2 border-primary">
           <h2 className="text-lg font-bold text-text-primary mb-2">
             Periodic Funding Returns
           </h2>
@@ -166,7 +168,7 @@ const ArbitrageDetailPage: React.FC = () => {
               </div>
             ))}
           </div>
-        </ModernCard>
+        </Card>
 
         {/* Historical Funding Chart - Moved Below Periodic Returns */}
         <ArbitrageHistoricalChart
@@ -182,7 +184,7 @@ const ArbitrageDetailPage: React.FC = () => {
         {/* Position Details Side by Side */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* Long Position */}
-          <ModernCard variant="flat" padding="lg">
+          <Card className="shadow-none border border-border bg-white p-6">
             <h3 className="text-lg font-bold text-text-primary mb-4">
               Long Position Details
             </h3>
@@ -234,10 +236,10 @@ const ArbitrageDetailPage: React.FC = () => {
                 </span>
               </div>
             </div>
-          </ModernCard>
+          </Card>
 
           {/* Short Position */}
-          <ModernCard variant="flat" padding="lg">
+          <Card className="shadow-none border border-border bg-white p-6">
             <h3 className="text-lg font-bold text-text-primary mb-4">
               Short Position Details
             </h3>
@@ -289,11 +291,11 @@ const ArbitrageDetailPage: React.FC = () => {
                 </span>
               </div>
             </div>
-          </ModernCard>
+          </Card>
         </div>
 
         {/* Sync Period Analysis */}
-        <ModernCard variant="default" padding="lg" className="mb-6">
+        <Card className="bg-white border border-border shadow-sm p-6 mb-6">
           <h3 className="text-lg font-bold text-text-primary mb-4">
             Synchronization Period Analysis
           </h3>
@@ -328,11 +330,11 @@ const ArbitrageDetailPage: React.FC = () => {
               </span>
             </div>
           </div>
-        </ModernCard>
+        </Card>
 
         {/* Spread Statistics */}
         {opportunity.spread_mean !== null && opportunity.spread_std_dev !== null && (
-          <ModernCard variant="default" padding="lg">
+          <Card className="bg-white border border-border shadow-sm p-6">
             <h3 className="text-lg font-bold text-text-primary mb-4">
               Historical Spread Statistics
             </h3>
@@ -355,7 +357,7 @@ const ArbitrageDetailPage: React.FC = () => {
                 </div>
               </div>
             </div>
-          </ModernCard>
+          </Card>
         )}
       </div>
     </div>

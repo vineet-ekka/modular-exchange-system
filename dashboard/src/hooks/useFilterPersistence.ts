@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
+import debounce from 'lodash/debounce';
 import { ExchangeFilterState } from '../types/exchangeFilter';
 import { ALL_EXCHANGES } from '../constants/exchangeMetadata';
 
@@ -60,9 +61,6 @@ export const loadFilterState = (): ExchangeFilterState => {
       const savedSet = new Set<string>(parsed.map(ex => ex.toLowerCase()));
       const mergedSet = new Set<string>([...savedSet, ...ALL_EXCHANGES]);
       selectedExchanges = mergedSet;
-      console.log('[FILTER] Merged exchanges from localStorage:', selectedExchanges.size, 'exchanges:', [...selectedExchanges].sort());
-    } else {
-      console.log('[FILTER] No saved exchanges, using default:', selectedExchanges.size, 'exchanges:', [...selectedExchanges].sort());
     }
 
     return {
@@ -79,10 +77,25 @@ export const loadFilterState = (): ExchangeFilterState => {
   }
 };
 
+const DEBOUNCE_MS = 500;
+
 export const useFilterPersistence = (
   filterState: ExchangeFilterState
 ): void => {
+  const debouncedSaveRef = useRef(
+    debounce((state: ExchangeFilterState) => {
+      saveFilterState(state);
+    }, DEBOUNCE_MS)
+  );
+
   useEffect(() => {
-    saveFilterState(filterState);
+    debouncedSaveRef.current(filterState);
   }, [filterState]);
+
+  useEffect(() => {
+    const debouncedFn = debouncedSaveRef.current;
+    return () => {
+      debouncedFn.cancel();
+    };
+  }, []);
 };

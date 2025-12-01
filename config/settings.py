@@ -21,7 +21,7 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "exchange_data")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres123")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 
 # Database table name where data will be stored
 DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
@@ -40,9 +40,7 @@ EXCHANGES = {
     'lighter': True,      # Enabled - Lighter blockchain perpetual contracts
     'bybit': True,        # Enabled - 696 perpetual contracts (668 linear + 28 inverse)
     'pacifica': True,     # Enabled - Pacifica Finance perpetual contracts
-    'paradex': True,      # Enabled - Paradex perpetual contracts (Starknet DEX)
     'hibachi': True,      # Enabled - Hibachi DEX perpetual contracts
-    'orderly': True,      # Enabled - Orderly Network perpetual contracts
     'deribit': True,      # Enabled - Deribit perpetual contracts
     'mexc': True,         # Enabled - MEXC perpetual contracts
     'dydx': True,         # Enabled - dYdX v4 perpetual contracts
@@ -141,6 +139,17 @@ HISTORICAL_BASE_BACKOFF = 60
 # This determines how many days of historical data are used to calculate
 # the mean, standard deviation, and percentiles for Z-score analysis
 ZSCORE_CALCULATION_DAYS = 30
+
+# Z-score calculation interval in seconds (default: 30 seconds)
+# Aligned with data collection interval for maximum freshness
+ZSCORE_CALCULATION_INTERVAL = 30
+
+# Zone-based scheduling intervals (for optimized updates)
+# Active zone: contracts with |Z| > 2.0 (volatile, need frequent updates)
+ZSCORE_ACTIVE_ZONE_INTERVAL = 30
+
+# Stable zone: contracts with |Z| <= 2.0 (stable, less frequent updates OK)
+ZSCORE_STABLE_ZONE_INTERVAL = 60
 
 # =============================================================================
 # STALE DATA MANAGEMENT SETTINGS

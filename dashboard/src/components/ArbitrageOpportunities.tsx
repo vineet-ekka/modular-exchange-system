@@ -1,30 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  fetchContractArbitrageOpportunities,
-  ContractArbitrageOpportunity,
-  ContractArbitrageResponse
-} from '../services/arbitrage';
-import { ModernCard, ModernButton, ModernSelect, ModernToggle, ModernTable, ModernBadge, ModernTooltip, ModernPagination } from './Modern';
+import { useArbitrageOpportunities } from '../hooks/useDataQueries';
+import { ContractArbitrageOpportunity } from '../services/arbitrage';
+import { Card } from './ui/card';
+import { Button } from './ui/button';
+import { SimpleSelect } from './ui/simple-select';
+import { DataTable } from './ui/data-table';
+import { Badge } from './ui/badge';
+import { Tooltip } from './ui/tooltip';
+import { Pagination } from './ui/pagination';
 import clsx from 'clsx';
 import { useArbitrageFilter } from '../hooks/useArbitrageFilter';
 import ArbitrageFilterPanel from './Arbitrage/ArbitrageFilterPanel';
 
 const ArbitrageOpportunities: React.FC = () => {
   const navigate = useNavigate();
-  const [data, setData] = useState<ContractArbitrageResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [minSpread, setMinSpread] = useState(0.0005);
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const [sortKey, setSortKey] = useState<string | undefined>(undefined);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Add filter state management
   const {
     filterState,
     updateFilter,
@@ -33,73 +29,17 @@ const ArbitrageOpportunities: React.FC = () => {
     buildQueryParams
   } = useArbitrageFilter();
 
-  const fetchData = useCallback(async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+  const filterParams = useMemo(() => buildQueryParams(), [buildQueryParams]);
 
-    abortControllerRef.current = new AbortController();
+  const {
+    data,
+    isLoading: loading,
+    isFetching,
+    error: queryError,
+    refetch
+  } = useArbitrageOpportunities(minSpread, currentPage, pageSize, filterParams);
 
-    try {
-      setLoading(true);
-
-      // Build filter parameters
-      const filterParams = buildQueryParams();
-
-      // Pass filter parameters to the API call
-      const response = await fetchContractArbitrageOpportunities(
-        minSpread,
-        currentPage,
-        pageSize,
-        filterParams
-      );
-
-      if (!abortControllerRef.current.signal.aborted) {
-        console.log('✅ Arbitrage data received:', response);
-        console.log('📊 Statistics available:', response.statistics);
-        console.log('📊 Total opportunities:', response.statistics?.total_opportunities);
-        setData(response);
-        setError(null);
-      }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setError('Failed to fetch arbitrage opportunities');
-        console.error(err);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [minSpread, pageSize, currentPage, buildQueryParams]);
-
-  // Initial fetch and fetch on filter changes
-  useEffect(() => {
-    fetchData();
-
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, [minSpread, pageSize, currentPage]);
-
-  useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
-    if (autoRefresh) {
-      intervalRef.current = setInterval(() => {
-        fetchData();
-      }, 30000);
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [autoRefresh, fetchData]);
+  const error = queryError ? 'Failed to fetch arbitrage opportunities' : null;
 
   const formatPercentage = (value?: number | null) => {
     if (value === null || value === undefined) return '-';
@@ -144,9 +84,9 @@ const ArbitrageOpportunities: React.FC = () => {
     else if (absZ >= 1) variant = 'info';
 
     return (
-      <ModernBadge variant={variant} size="sm">
+      <Badge variant={variant}>
         Z: {zScore.toFixed(2)}
-      </ModernBadge>
+      </Badge>
     );
   };
 
@@ -197,29 +137,29 @@ const ArbitrageOpportunities: React.FC = () => {
 
   if (loading && !data) {
     return (
-      <ModernCard variant="default" padding="xl">
+      <Card className="bg-white border border-border shadow-sm p-8">
         <div className="flex flex-col items-center justify-center py-8">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />
           <p className="text-text-secondary">Loading arbitrage opportunities...</p>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <ModernCard variant="default" padding="xl">
+      <Card className="bg-white border border-border shadow-sm p-8">
         <div className="text-center py-8">
           <p className="text-danger text-lg font-medium">{error}</p>
-          <ModernButton
-            variant="primary"
-            onClick={fetchData}
+          <Button
+            variant="default"
+            onClick={() => refetch()}
             className="mt-4"
           >
             Retry
-          </ModernButton>
+          </Button>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
@@ -266,12 +206,12 @@ const ArbitrageOpportunities: React.FC = () => {
     {
       key: 'rateSpread',
       header: (
-        <ModernTooltip
+        <Tooltip
           content="The funding rate difference between long and short positions. APR Spread shows the annualized percentage return from this arbitrage opportunity."
           position="bottom"
         >
           <span>Funding Rate Spread</span>
-        </ModernTooltip>
+        </Tooltip>
       ),
       accessor: (row: ContractArbitrageOpportunity) => (
         <div className="text-center">
@@ -301,12 +241,12 @@ const ArbitrageOpportunities: React.FC = () => {
     {
       key: 'zscores',
       header: (
-        <ModernTooltip
+        <Tooltip
           content="Z-score of the APR spread combination. Calculated as (Current APR Spread - Mean Historical APR Spread) / Standard Deviation. Values >2 or <-2 indicate statistically significant opportunities."
           position="bottom"
         >
           <span>Spread Z-Score</span>
-        </ModernTooltip>
+        </Tooltip>
       ),
       accessor: (row: ContractArbitrageOpportunity) => (
         <div className="flex flex-col items-center gap-1">
@@ -355,24 +295,24 @@ const ArbitrageOpportunities: React.FC = () => {
         onFilterChange={updateFilter}
         onApply={() => {
           setCurrentPage(1); // Reset to first page on filter apply
-          fetchData();
+          refetch();
         }}
         onReset={() => {
           resetFilter();
           setCurrentPage(1);
-          fetchData();
+          refetch();
         }}
       />
 
       {/* Controls */}
-      <ModernCard padding="lg">
+      <Card className="p-6">
         <div className="flex flex-wrap gap-4 items-end">
-          <ModernSelect
+          <SimpleSelect
             label="Minimum Spread"
             value={minSpread}
             onChange={(value) => {
               setMinSpread(Number(value));
-              setCurrentPage(1);  // Reset to first page when filter changes
+              setCurrentPage(1);
             }}
             options={[
               { value: 0.0001, label: '0.01%' },
@@ -383,12 +323,12 @@ const ArbitrageOpportunities: React.FC = () => {
             ]}
           />
 
-          <ModernSelect
+          <SimpleSelect
             label="Page Size"
             value={pageSize}
             onChange={(value) => {
               setPageSize(Number(value));
-              setCurrentPage(1);  // Reset to first page when page size changes
+              setCurrentPage(1);
             }}
             options={[
               { value: 10, label: '10' },
@@ -397,17 +337,9 @@ const ArbitrageOpportunities: React.FC = () => {
             ]}
           />
 
-          <div className="flex items-center gap-2">
-            <ModernToggle
-              checked={autoRefresh}
-              onChange={setAutoRefresh}
-              label="Auto-refresh (30s)"
-            />
-          </div>
-
-          <ModernButton
-            variant="primary"
-            onClick={fetchData}
+          <Button
+            variant="default"
+            onClick={() => refetch()}
             loading={loading}
             icon={
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -416,64 +348,64 @@ const ArbitrageOpportunities: React.FC = () => {
             }
           >
             Refresh
-          </ModernButton>
+          </Button>
         </div>
-      </ModernCard>
+      </Card>
 
       {/* Statistics */}
       {data?.statistics && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          <ModernCard variant="flat" padding="md">
+          <Card className="shadow-none border border-border bg-white p-4">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
               Total Opportunities
             </div>
             <div className="text-2xl font-bold text-text-primary">
               {data?.statistics?.total_opportunities || 0}
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="flat" padding="md">
+          <Card className="shadow-none border border-border bg-white p-4">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
               Max Spread
             </div>
             <div className="text-2xl font-bold text-success">
               {formatPercentageValue(data?.statistics?.max_spread || 0)}
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="flat" padding="md">
+          <Card className="shadow-none border border-border bg-white p-4">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
               Max Daily Spread
             </div>
             <div className="text-2xl font-bold text-warning">
               {formatPercentageValue(data?.statistics?.max_daily_spread || 0)}
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="flat" padding="md">
+          <Card className="shadow-none border border-border bg-white p-4">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
               Max APR Spread
             </div>
             <div className="text-2xl font-bold text-warning">
               {formatAPR(data?.statistics?.max_apr_spread || 0)}
             </div>
-          </ModernCard>
+          </Card>
 
-          <ModernCard variant="flat" padding="md">
+          <Card className="shadow-none border border-border bg-white p-4">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">
               Contracts Analyzed
             </div>
             <div className="text-2xl font-bold text-text-primary">
               {data?.statistics?.contracts_analyzed || 0}
             </div>
-          </ModernCard>
+          </Card>
         </div>
       )}
 
       {/* Data Table */}
-      <ModernCard padding="none" className="relative">
-        {/* Loading overlay for smooth page transitions */}
-        {loading && data && (
+      <Card className="p-0 relative">
+        {/* Loading overlay for page transitions */}
+        {isFetching && (
           <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex items-center justify-center z-20 rounded-lg">
             <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-lg shadow-lg">
               <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -483,7 +415,7 @@ const ArbitrageOpportunities: React.FC = () => {
             </div>
           </div>
         )}
-        <ModernTable
+        <DataTable
           columns={columns}
           data={sortData(data?.opportunities || [])}
           striped
@@ -495,30 +427,29 @@ const ArbitrageOpportunities: React.FC = () => {
           sortDirection={sortDirection}
           onRowClick={handleRowClick}
         />
-      </ModernCard>
+      </Card>
 
       {/* Pagination */}
       {data?.pagination && data.pagination.total_pages > 1 && (
-        <ModernCard padding="lg">
-          <ModernPagination
+        <Card className="p-6">
+          <Pagination
             currentPage={currentPage}
             totalPages={data.pagination.total_pages}
             pageSize={pageSize}
             totalItems={data.pagination.total}
             onPageChange={setCurrentPage}
           />
-        </ModernCard>
+        </Card>
       )}
 
       {/* Last Update */}
       {data && (
         <div className="text-center text-sm text-text-tertiary">
-          Last updated: {new Date().toLocaleTimeString()}
-          {autoRefresh && ' • Auto-refreshing every 30 seconds'}
+          Last updated: {new Date().toLocaleTimeString()} • Auto-refreshing every 30 seconds
         </div>
       )}
     </div>
   );
 };
 
-export default ArbitrageOpportunities;
+export default React.memo(ArbitrageOpportunities);

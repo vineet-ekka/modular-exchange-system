@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-// Chart components removed - table view only
 import clsx from 'clsx';
 import LiveFundingTicker from '../Ticker/LiveFundingTicker';
-import ModernPagination from '../Modern/ModernPagination';
+import { Pagination } from '../ui/pagination';
 // FundingChartTooltip removed - no longer using charts
 import { calculateContractStats } from '../../utils/fundingChartUtils';
 import type { ProcessedFundingData } from '../../types/fundingChart';
@@ -274,16 +273,6 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
         rawTimestamp: item.rawTimestamp || item.timestamp
       })) as ChartDataPoint[];
       setCombinedData(chartData);
-      
-      // Debug: Log the data to see what's being charted
-      if (selectedContract && chartData.length > 0) {
-        console.log('Chart data for', selectedContract, ':', {
-          firstPoint: chartData[0][selectedContract],
-          firstAPR: chartData[0][`${selectedContract}_apr`],
-          dataKey: selectedContract,
-          sample: chartData.slice(0, 3)
-        });
-      }
     }
   }, [selectedContract, historicalData]);
 
@@ -558,7 +547,7 @@ const HistoricalFundingView: React.FC<HistoricalFundingViewProps> = ({ asset, on
         {/* Pagination - only show when there are multiple pages */}
         {totalPages > 1 && (
           <div className="px-6 py-4 border-t border-light-border bg-white">
-            <ModernPagination
+            <Pagination
               currentPage={currentPage}
               totalPages={totalPages}
               pageSize={pageSize}

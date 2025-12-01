@@ -264,18 +264,18 @@ class DeribitExchange(BaseExchange):
     def fetch_historical_funding_rates(self, symbol: str, days: int = 30) -> pd.DataFrame:
         """
         Fetch historical funding rates for a symbol.
-        
+
         Args:
             symbol: Trading symbol
             days: Number of days to fetch
-            
+
         Returns:
             DataFrame with historical funding rates
         """
         try:
             end_time = int(time.time() * 1000)
             start_time = end_time - (days * 24 * 60 * 60 * 1000)
-            
+
             payload = {
                 'jsonrpc': '2.0',
                 'method': 'public/get_funding_rate_history',
@@ -286,19 +286,120 @@ class DeribitExchange(BaseExchange):
                 },
                 'id': self._get_next_request_id()
             }
-            
+
             data = self.safe_post_request(self.base_url, json_data=payload)
-            
+
             if data and 'result' in data:
                 rows = data['result']
                 if rows:
                     df = pd.DataFrame(rows)
                     df['funding_time'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
                     df['funding_rate'] = df['interest_8h'].astype(float)
+                    df['symbol'] = symbol
                     return df[['symbol', 'funding_rate', 'funding_time']]
-            
+
             return pd.DataFrame()
 
         except Exception as e:
             self.logger.error(f"Error fetching historical funding rates for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _extract_base_asset(self, symbol: str) -> str:
+        """
+        Extract base asset from Deribit symbol.
+
+        Args:
+            symbol: Trading symbol (e.g., 'BTC-PERPETUAL' or 'ETH-PERPETUAL')
+
+        Returns:
+            Base asset (e.g., 'BTC' or 'ETH')
+        """
+        if not symbol:
+            return symbol
+
+        if '-PERPETUAL' in symbol:
+            return symbol.replace('-PERPETUAL', '')
+
+        if '-' in symbol:
+            return symbol.split('-')[0]
+
+        return symbol
+
+    def fetch_all_perpetuals_historical(self, days: int = 30,
+                                       batch_size: int = 10,
+                                       progress_callback=None,
+                                       start_time: Optional[datetime] = None,
+                                       end_time: Optional[datetime] = None) -> pd.DataFrame:
+        """
+        Fetch historical funding rates for all perpetual contracts.
+
+        Args:
+            days: Number of days of historical data to fetch
+            batch_size: Number of symbols to fetch concurrently (unused, kept for compatibility)
+            progress_callback: Callback for progress updates
+            start_time: Optional start time (unused, Deribit API uses millisecond timestamps)
+            end_time: Optional end time (unused, Deribit API uses millisecond timestamps)
+
+        Returns:
+            Combined DataFrame with all historical funding rates
+        """
+        try:
+            perpetuals = self._fetch_perpetual_instruments()
+            if not perpetuals:
+                self.logger.warning("No perpetual instruments found")
+                return pd.DataFrame()
+
+            perp_symbols = [inst['instrument_name'] for inst in perpetuals]
+
+            if not perp_symbols:
+                self.logger.warning("No perpetual symbols found")
+                return pd.DataFrame()
+
+            self.logger.info(f"Fetching historical data for {len(perp_symbols)} perpetual contracts")
+
+            all_historical_data = []
+            total_symbols = len(perp_symbols)
+
+            for i, symbol in enumerate(perp_symbols):
+                try:
+                    df = self.fetch_historical_funding_rates(symbol, days)
+                    if not df.empty:
+                        df['exchange'] = 'Deribit'
+                        df['funding_interval_hours'] = 8
+
+                        base_asset = self._extract_base_asset(symbol)
+                        df['base_asset'] = base_asset
+
+                        if 'USDC' in symbol:
+                            df['quote_asset'] = 'USDC'
+                        elif 'BTC' in base_asset:
+                            df['quote_asset'] = 'USD'
+                        elif 'ETH' in base_asset:
+                            df['quote_asset'] = 'USD'
+                        else:
+                            df['quote_asset'] = 'USD'
+
+                        all_historical_data.append(df)
+                        self.logger.debug(f"Fetched {len(df)} records for {symbol}")
+
+                    if progress_callback:
+                        progress = ((i + 1) / total_symbols) * 100
+                        progress_callback(i + 1, total_symbols, progress, f"Processing {symbol}")
+
+                    time.sleep(0.1)
+
+                except Exception as e:
+                    self.logger.error(f"Error fetching historical data for {symbol}: {str(e)}")
+                    continue
+
+            if all_historical_data:
+                combined_df = pd.concat(all_historical_data, ignore_index=True)
+                self.logger.info(f"Completed: fetched {len(combined_df)} total historical records")
+                return combined_df
+            else:
+                self.logger.warning("No historical data fetched")
+                return pd.DataFrame()
+
+        except Exception as e:
+            self.logger.error(f"Error in fetch_all_perpetuals_historical: {str(e)}")
             return pd.DataFrame()

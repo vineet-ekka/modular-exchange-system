@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import debounce from 'lodash/debounce';
 import { ArbitrageFilterState, DEFAULT_ARBITRAGE_FILTER_STATE, Asset } from '../types/arbitrageFilter';
 import { ALL_EXCHANGES } from '../constants/exchangeMetadata';
 
 const STORAGE_KEY = 'arbitrage_filter_state';
+const DEBOUNCE_MS = 500;
 
 export const useArbitrageFilter = () => {
   const [filterState, setFilterState] = useState<ArbitrageFilterState>(() => {
@@ -23,19 +25,31 @@ export const useArbitrageFilter = () => {
     return DEFAULT_ARBITRAGE_FILTER_STATE;
   });
 
-  // Persist to localStorage on change
+  const debouncedSaveRef = useRef(
+    debounce((state: ArbitrageFilterState) => {
+      try {
+        const toSave = {
+          ...state,
+          selectedExchanges: Array.from(state.selectedExchanges),
+          selectedIntervals: Array.from(state.selectedIntervals),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+      } catch (error) {
+        console.error('Failed to save filter state to localStorage:', error);
+      }
+    }, DEBOUNCE_MS)
+  );
+
   useEffect(() => {
-    try {
-      const toSave = {
-        ...filterState,
-        selectedExchanges: Array.from(filterState.selectedExchanges),
-        selectedIntervals: Array.from(filterState.selectedIntervals),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-    } catch (error) {
-      console.error('Failed to save filter state to localStorage:', error);
-    }
+    debouncedSaveRef.current(filterState);
   }, [filterState]);
+
+  useEffect(() => {
+    const debouncedFn = debouncedSaveRef.current;
+    return () => {
+      debouncedFn.cancel();
+    };
+  }, []);
 
   // Update partial filter state
   const updateFilter = useCallback((partial: Partial<ArbitrageFilterState>) => {

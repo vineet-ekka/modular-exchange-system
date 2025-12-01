@@ -45,9 +45,7 @@ const AssetFundingGrid: React.FC = () => {
       try {
         const response = await fetch('http://localhost:8000/api/funding-rates-grid');
         const result = await response.json();
-        
-        console.log('Fetched grid data:', result); // Debug log
-        
+
         if (result.data && result.data.length > 0) {
           // Normalize exchange keys to lowercase for consistency
           const normalizedData = result.data.map((item: AssetGridData) => ({
@@ -58,7 +56,6 @@ const AssetFundingGrid: React.FC = () => {
           }));
 
           setGridData(normalizedData);
-          console.log('Set grid data with', normalizedData.length, 'assets');
 
           // Extract unique exchanges
           const uniqueExchanges = new Set<string>();
@@ -69,9 +66,6 @@ const AssetFundingGrid: React.FC = () => {
           });
           const exchangeList = Array.from(uniqueExchanges).sort();
           setExchanges(exchangeList);
-          console.log('Found exchanges:', exchangeList);
-        } else {
-          console.log('No data received from API');
         }
       } catch (error) {
         console.error('Error fetching grid data:', error);
@@ -222,9 +216,7 @@ const AssetFundingGrid: React.FC = () => {
       if (!contractsData[asset]) {
         setLoadingContracts(prev => new Set(prev).add(asset));
         try {
-          console.log(`Fetching contracts for asset: ${asset}`);
           const contracts = await fetchContractsByAsset(asset);
-          console.log(`Received ${contracts?.length || 0} contracts for ${asset}:`, contracts);
           setContractsData(prev => ({
             ...prev,
             [asset]: contracts

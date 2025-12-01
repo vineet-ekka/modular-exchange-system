@@ -17,7 +17,6 @@ EXCHANGE_SCHEDULE = [
     ("drift", 240),       # Starts 240s after collection begins (Solana DEX, 1-hour funding)
     ("lighter", 265),     # Starts 265s after collection begins (blockchain DEX)
     ("pacifica", 270),    # Starts 270s after collection begins (Pacifica Finance)
-    ("paradex", 275),     # Starts 275s after collection begins (Starknet DEX)
     ("kraken", 300),      # Would start 300s after collection begins (when enabled)
     ("deribit", 330),     # Would start 330s after collection begins (when enabled)
 ]
@@ -38,7 +37,6 @@ SCHEDULES = {
         ("drift", 40),
         ("lighter", 45),
         ("pacifica", 50),
-        ("paradex", 52),
         ("kraken", 55),
         ("deribit", 60),
     ],
@@ -54,7 +52,6 @@ SCHEDULES = {
         ("drift", 300),
         ("lighter", 330),
         ("pacifica", 360),
-        ("paradex", 365),
         ("kraken", 390),
         ("deribit", 420),
     ],
@@ -69,7 +66,6 @@ SCHEDULES = {
         ("drift", 15),      # Solana DEX with hourly funding
         ("lighter", 18),    # Blockchain DEX
         ("pacifica", 20),   # Pacifica Finance
-        ("paradex", 22),    # Starknet DEX
         ("backpack", 50),   # Lower priority
         ("kraken", 55),     # Lower priority
         ("deribit", 60),    # Lower priority

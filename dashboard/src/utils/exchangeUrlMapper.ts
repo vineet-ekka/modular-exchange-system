@@ -45,17 +45,6 @@ const EXCHANGE_URL_CONFIGS: Record<string, ExchangeUrlConfig> = {
       return baseAsset || symbol.replace(/USDT$/, '');
     },
   },
-  paradex: {
-    pattern: 'https://app.paradex.trade/trade/{symbol}',
-    usesBaseAsset: true,
-    transformer: (symbol: string, baseAsset?: string) => {
-      const asset = baseAsset || symbol.replace(/USDT$/, '');
-      return `${asset}-USD-PERP`;
-    },
-  },
-  orderly: {
-    pattern: 'https://app.orderly.network/perp/{symbol}',
-  },
   pacifica: {
     pattern: 'https://app.pacifica.fi/trade/{symbol}',
   },

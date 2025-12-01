@@ -73,29 +73,13 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
     funding_intervals: [1],
     orderPriority: 9
   },
-  paradex: {
-    type: 'DEX',
-    category: 'Emerging',
-    contracts: 122,
-    color: '#8B5CF6',
-    funding_intervals: [1, 2, 4, 8],
-    orderPriority: 10
-  },
   deribit: {
     type: 'CEX',
     category: 'Options',
     contracts: 20,
     color: '#3B3B3B',
     funding_intervals: [8],
-    orderPriority: 11
-  },
-  orderly: {
-    type: 'DEX',
-    category: 'Major',
-    contracts: 139,
-    color: '#00D4AA',
-    funding_intervals: [8],
-    orderPriority: 12
+    orderPriority: 10
   },
   hibachi: {
     type: 'DEX',
@@ -103,7 +87,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
     contracts: 20,
     color: '#FF6B6B',
     funding_intervals: [8],
-    orderPriority: 13
+    orderPriority: 11
   },
   mexc: {
     type: 'CEX',
@@ -111,7 +95,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
     contracts: 826,
     color: '#00D4FF',
     funding_intervals: [8],
-    orderPriority: 14
+    orderPriority: 12
   },
   dydx: {
     type: 'DEX',
@@ -119,7 +103,7 @@ export const EXCHANGE_METADATA: Record<string, ExchangeMetadata> = {
     contracts: 199,
     color: '#6B46C1',
     funding_intervals: [8],
-    orderPriority: 15
+    orderPriority: 13
   },
   kraken: {
     type: 'CEX',

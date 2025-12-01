@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from itertools import combinations
 import psycopg2
 from psycopg2.extras import execute_values
 from typing import List, Dict, Tuple
@@ -17,7 +18,7 @@ import logging
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config.settings import POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD
+from config.settings import POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD, EXCHANGES
 from utils.logger import setup_logger
 
 logger = setup_logger("SpreadBackfillV2")
@@ -54,23 +55,22 @@ def calculate_and_insert_spreads(conn, days: int = 30):
 
     logger.info(f"Found {len(assets)} unique assets to process")
 
-    exchange_pairs = [
-        ('binance', 'kucoin'),
-        ('binance', 'backpack'),
-        ('binance', 'hyperliquid'),
-        ('kucoin', 'backpack'),
-        ('kucoin', 'hyperliquid'),
-        ('backpack', 'hyperliquid')
-    ]
+    # Generate exchange pairs dynamically from enabled exchanges
+    enabled_exchanges = [name for name, enabled in EXCHANGES.items() if enabled]
+    exchange_pairs = list(combinations(enabled_exchanges, 2))
+    logger.info(f"Generating arbitrage spreads for {len(exchange_pairs)} exchange pairs")
+    logger.info(f"Exchange pairs: {exchange_pairs[:5]}{'...' if len(exchange_pairs) > 5 else ''}")
 
     total_inserted = 0
     processed_assets = 0
+    failed_assets = []
 
     for asset in assets:
         asset_inserted = 0
 
-        for ex1, ex2 in exchange_pairs:
-            try:
+        # Start a new transaction block for this asset
+        try:
+            for ex1, ex2 in exchange_pairs:
                 # Build the query to calculate daily spreads
                 # This handles symbol matching across exchanges
                 query = """
@@ -82,7 +82,7 @@ def calculate_and_insert_spreads(conn, days: int = 30):
                             COUNT(*) as data_points
                         FROM funding_rates_historical
                         WHERE exchange = %s
-                            AND funding_time >= NOW() - INTERVAL '%s days'
+                            AND funding_time >= NOW() - (%s || ' days')::interval
                             AND (
                                 -- Match various symbol formats
                                 UPPER(symbol) LIKE UPPER(%s) || '%%'
@@ -102,7 +102,7 @@ def calculate_and_insert_spreads(conn, days: int = 30):
                             COUNT(*) as data_points
                         FROM funding_rates_historical
                         WHERE exchange = %s
-                            AND funding_time >= NOW() - INTERVAL '%s days'
+                            AND funding_time >= NOW() - (%s || ' days')::interval
                             AND (
                                 UPPER(symbol) LIKE UPPER(%s) || '%%'
                                 OR UPPER(symbol) LIKE '1000' || UPPER(%s) || '%%'
@@ -165,20 +165,29 @@ def calculate_and_insert_spreads(conn, days: int = 30):
                 if count1 > 0 or count2 > 0:
                     asset_inserted += count1 + count2
 
-            except Exception as e:
-                logger.debug(f"Error processing {asset} for {ex1}-{ex2}: {e}")
-
-        if asset_inserted > 0:
-            total_inserted += asset_inserted
-            processed_assets += 1
-
-            if processed_assets % 50 == 0:
+            # Commit this asset's data (transaction boundary per asset)
+            if asset_inserted > 0:
                 conn.commit()
-                logger.info(f"Processed {processed_assets}/{len(assets)} assets, inserted {total_inserted} spreads...")
+                total_inserted += asset_inserted
+                processed_assets += 1
 
-    # Final commit
-    conn.commit()
+                if processed_assets % 50 == 0:
+                    logger.info(f"Processed {processed_assets}/{len(assets)} assets, inserted {total_inserted} spreads...")
+
+        except Exception as e:
+            # Rollback this asset's transaction on error
+            conn.rollback()
+            failed_assets.append(asset)
+            logger.error(f"Failed to process asset {asset}: {e}")
+            continue
+
     cursor.close()
+
+    # Report failures if any
+    if failed_assets:
+        logger.warning(f"Failed to process {len(failed_assets)} assets: {', '.join(failed_assets[:10])}")
+        if len(failed_assets) > 10:
+            logger.warning(f"... and {len(failed_assets) - 10} more")
 
     logger.info(f"Completed: Processed {processed_assets} assets, inserted {total_inserted} spread records")
     return total_inserted
@@ -249,7 +258,7 @@ def main(days: int = 30, force: bool = False):
             cursor.execute("""
                 SELECT COUNT(DISTINCT DATE(recorded_at))
                 FROM arbitrage_spreads_historical
-                WHERE recorded_at >= NOW() - INTERVAL '%s days'
+                WHERE recorded_at >= NOW() - (%s || ' days')::interval
             """, (days,))
             existing_days = cursor.fetchone()[0]
             cursor.close()
@@ -281,9 +290,16 @@ def main(days: int = 30, force: bool = False):
         logger.error(f"Fatal error during backfill: {e}")
         import traceback
         traceback.print_exc()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     import argparse

@@ -11,7 +11,7 @@ import {
   ReferenceLine,
   Legend
 } from 'recharts';
-import { ModernCard } from '../Modern';
+import { Card } from '../ui/card';
 
 interface HistoricalDataPoint {
   timestamp: string;
@@ -315,18 +315,18 @@ const ArbitrageHistoricalChart: React.FC<ArbitrageHistoricalChartProps> = ({
 
   if (loading) {
     return (
-      <ModernCard variant="elevated" padding="xl">
+      <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-1/3"></div>
           <div className="h-64 bg-gray-100 rounded"></div>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <ModernCard variant="elevated" padding="xl">
+      <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-8">
         <div className="bg-red-50 border border-red-200 rounded-lg p-6">
           <h3 className="text-lg font-medium text-red-800">Error Loading Chart Data</h3>
           <p className="mt-2 text-sm text-red-600">{error}</p>
@@ -337,12 +337,12 @@ const ArbitrageHistoricalChart: React.FC<ArbitrageHistoricalChartProps> = ({
             Try Again
           </button>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
   return (
-    <ModernCard variant="elevated" padding="xl">
+    <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-8">
       <div className="space-y-4">
         {/* Header */}
         <div className="flex justify-between items-center">
@@ -526,7 +526,7 @@ const ArbitrageHistoricalChart: React.FC<ArbitrageHistoricalChartProps> = ({
           </div>
         </div>
       </div>
-    </ModernCard>
+    </Card>
   );
 };
 

@@ -1,34 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import Header from '../components/Layout/Header';
 import DashboardStatsCard from '../components/Cards/DashboardStatsCard';
-import AssetFundingGrid from '../components/Grid/AssetFundingGrid';
-import {
-  fetchStatistics,
-  Statistics
-} from '../services/api';
+import AssetFundingGrid from '../components/Grid/AssetFundingGridV2';
+import { useDashboardStats } from '../hooks/useDataQueries';
 
 function DashboardPage() {
-  const [stats, setStats] = useState<Statistics | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const { data: stats, dataUpdatedAt } = useDashboardStats();
 
-  // Fetch statistics only
-  useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const statsData = await fetchStatistics();
-        setStats(statsData);
-        setLastUpdate(new Date());
-      } catch (error) {
-        console.error('Error loading statistics:', error);
-      }
-    };
-
-    loadStats();
-    
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(loadStats, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const lastUpdate = useMemo(() => {
+    return dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
+  }, [dataUpdatedAt]);
 
   return (
     <div className="min-h-screen bg-background">

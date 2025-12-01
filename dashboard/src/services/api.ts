@@ -353,9 +353,7 @@ export const fetchContractsWithZScores = async (
 // Fetch contracts by asset for expanded view
 export const fetchContractsByAsset = async (asset: string): Promise<ContractDetails[]> => {
   try {
-    console.log(`API: Fetching contracts for asset: ${asset}`);
     const response = await api.get(`/api/funding-rates?base_asset=${asset}&limit=2000`);
-    console.log(`API: Response for ${asset}:`, response.data);
     
     // Ensure we return an array
     if (Array.isArray(response.data)) {

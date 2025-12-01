@@ -69,7 +69,7 @@ export const ContractLink: React.FC<ContractLinkProps> = ({
       target="_blank"
       rel="noopener noreferrer"
       onClick={handleClick}
-      className={`${className} text-blue-500 hover:text-blue-700 hover:underline transition-colors duration-150 inline-flex items-center gap-1`}
+      className={`${className} text-sky-500 hover:text-sky-700 hover:underline transition-colors duration-150 inline-flex items-center gap-1`}
       title={`Open ${symbol} on ${exchange}`}
     >
       <span>{symbol}</span>

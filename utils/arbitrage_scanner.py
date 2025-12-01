@@ -8,10 +8,31 @@ Includes statistical significance analysis using z-scores and percentiles.
 from typing import List, Dict, Any, Optional
 from itertools import combinations
 import logging
+import time
 import numpy as np
 from utils.logger import setup_logger
 
 logger = setup_logger("ArbitrageScanner")
+
+
+class SpreadStatsCache:
+    """Simple time-based cache for spread statistics with 15s TTL."""
+    def __init__(self):
+        self._data = None
+        self._timestamp = 0
+        self._ttl = 15
+
+    def get(self, key, ttl_seconds=15):
+        if self._data and (time.time() - self._timestamp) < ttl_seconds:
+            return self._data
+        return None
+
+    def set(self, key, value, ttl_seconds=15):
+        self._data = value
+        self._timestamp = time.time()
+
+
+_spread_stats_cache = SpreadStatsCache()
 
 def calculate_arbitrage_opportunities(
     funding_data: List[Dict[str, Any]],
@@ -271,7 +292,7 @@ def get_top_opportunities(
     }
 
 
-def batch_calculate_spread_statistics(cur, logger) -> Dict:
+def batch_calculate_spread_statistics(cur, logger, cache=None) -> Dict:
     """
     Pre-calculate spread statistics for all potential contract pairs in ONE query.
     Replaces 20,000+ individual queries with a single batch operation.
@@ -279,10 +300,22 @@ def batch_calculate_spread_statistics(cur, logger) -> Dict:
     This is the critical performance optimization that reduces response time
     from 3-16 minutes to 1-3 seconds.
 
+    Args:
+        cur: Database cursor
+        logger: Logger instance
+        cache: Optional cache instance for 15s TTL caching
+
     Returns:
         Dictionary mapping (ex1, sym1, ex2, sym2) -> {mean, std_dev, data_points}
     """
     import time
+
+    cache_key = 'spread_statistics_batch'
+    if cache:
+        cached = cache.get(cache_key, ttl_seconds=15)
+        if cached:
+            logger.info("Using cached spread statistics (15s TTL)")
+            return cached
 
     start_time = time.time()
 
@@ -360,11 +393,14 @@ def batch_calculate_spread_statistics(cur, logger) -> Dict:
         elapsed = time.time() - start_time
         logger.info(f"Batch spread statistics calculated: {row_count} pairs in {elapsed:.2f}s")
 
+        if cache and spread_cache:
+            cache.set(cache_key, spread_cache, ttl_seconds=15)
+            logger.info("Cached spread statistics for 15s")
+
         return spread_cache
 
     except Exception as e:
         logger.error(f"Error in batch spread statistics calculation: {e}")
-        # Return empty cache on error - will fall back to no Z-scores
         return {}
 
 
@@ -499,7 +535,7 @@ def calculate_contract_level_arbitrage(
         # CRITICAL OPTIMIZATION: Pre-calculate all spread statistics in one batch query
         # This replaces 20,000+ individual queries with a single operation
         logger.info("Calculating batch spread statistics...")
-        spread_cache = batch_calculate_spread_statistics(hist_cur, logger)
+        spread_cache = batch_calculate_spread_statistics(hist_cur, logger, cache=_spread_stats_cache)
         logger.info(f"Spread cache populated with {len(spread_cache)} entries")
 
         opportunities = []

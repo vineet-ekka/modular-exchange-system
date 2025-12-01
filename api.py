@@ -164,7 +164,7 @@ DB_CONFIG = {
     'port': os.getenv("POSTGRES_PORT", "5432"),
     'database': os.getenv("POSTGRES_DATABASE", "exchange_data"),
     'user': os.getenv("POSTGRES_USER", "postgres"),
-    'password': os.getenv("POSTGRES_PASSWORD", "postgres123")
+    'password': os.getenv("POSTGRES_PASSWORD", "")
 }
 
 # Initialize connection pool for better performance
@@ -318,6 +318,125 @@ async def performance_health():
     except Exception as e:
         return JSONResponse(
             status_code=503,
+            content={
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+
+@app.get("/api/health/collection-metrics")
+async def collection_metrics():
+    """Get data collection timing metrics from the last collection run (Redis with filesystem fallback)."""
+    try:
+        metrics_cache_key = 'collection:metrics'
+        metrics = api_cache.get(metrics_cache_key, ttl_seconds=60)
+
+        if not metrics:
+            metrics_file = Path(__file__).parent / '.collection_metrics.json'
+
+            if not metrics_file.exists():
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "status": "not_available",
+                        "message": "No collection metrics available yet. Metrics will be available after the first data collection.",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                )
+
+            with open(metrics_file, 'r') as f:
+                metrics = json.load(f)
+
+        total_duration = metrics.get('total_duration_ms', 0)
+        total_exchanges = len(metrics.get('exchanges', {}))
+        success_count = metrics.get('success_count', 0)
+        failure_count = metrics.get('failure_count', 0)
+
+        total_contracts = sum(
+            ex.get('record_count', 0)
+            for ex in metrics.get('exchanges', {}).values()
+        )
+
+        exchanges_by_duration = sorted(
+            [
+                {
+                    'name': name,
+                    'duration_ms': data.get('duration_ms', 0),
+                    'record_count': data.get('record_count', 0),
+                    'status': data.get('status', 'unknown'),
+                    'speed_contracts_per_sec': (
+                        (data.get('record_count', 0) / data.get('duration_ms', 1)) * 1000
+                        if data.get('duration_ms', 0) > 0 and data.get('record_count', 0) > 0
+                        else 0
+                    )
+                }
+                for name, data in metrics.get('exchanges', {}).items()
+            ],
+            key=lambda x: x['duration_ms'],
+            reverse=True
+        )
+
+        slowest_exchange = exchanges_by_duration[0] if exchanges_by_duration else None
+        fastest_exchange = exchanges_by_duration[-1] if exchanges_by_duration else None
+
+        overall_speed = (
+            (total_contracts / total_duration) * 1000
+            if total_duration > 0 and total_contracts > 0
+            else 0
+        )
+
+        return {
+            "status": "ok",
+            "collection_summary": {
+                "total_duration_ms": total_duration,
+                "total_duration_seconds": total_duration / 1000,
+                "total_contracts": total_contracts,
+                "total_exchanges": total_exchanges,
+                "successful_exchanges": success_count,
+                "failed_exchanges": failure_count,
+                "success_rate": (success_count / total_exchanges * 100) if total_exchanges > 0 else 0,
+                "overall_speed_contracts_per_sec": overall_speed,
+                "batch_id": metrics.get('batch_id'),
+                "batch_timestamp": metrics.get('batch_timestamp')
+            },
+            "exchange_breakdown": exchanges_by_duration,
+            "performance_insights": {
+                "slowest_exchange": slowest_exchange,
+                "fastest_exchange": fastest_exchange,
+                "avg_duration_ms": (
+                    sum(ex['duration_ms'] for ex in exchanges_by_duration) / len(exchanges_by_duration)
+                    if exchanges_by_duration else 0
+                ),
+                "slow_exchanges_count": sum(
+                    1 for ex in exchanges_by_duration
+                    if ex['duration_ms'] >= 5000
+                )
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except FileNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "not_available",
+                "message": "Collection metrics file not found",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+    except json.JSONDecodeError as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error": f"Failed to parse metrics file: {str(e)}",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
             content={
                 "status": "error",
                 "error": str(e),
@@ -766,7 +885,7 @@ async def get_historical_funding(
         if start_time:
             start_dt = datetime.fromisoformat(start_time)
         else:
-            start_dt = end_dt - timedelta(days=7)  # Default to 7 days
+            start_dt = end_dt - timedelta(days=30)  # Default to 30 days
         
         # Query historical data
         cur.execute("""
@@ -1235,7 +1354,7 @@ async def get_contract_level_arbitrage_opportunities(
         })
 
         # Cache the result - reduced to 30s to match data update cycle
-        api_cache.set(cache_key, sanitized_result, ttl_seconds=30)  # Cache for 30 seconds
+        api_cache.set(cache_key, sanitized_result, ttl_seconds=15)  # Cache for 15 seconds for fresher Z-scores
         logger.info(f"Cached arbitrage page {page}")
 
         return sanitized_result
@@ -1778,6 +1897,36 @@ async def shutdown_dashboard():
         "message": "Dashboard is shutting down. Please wait a moment...",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """
+    Clear Redis/fallback cache.
+    """
+    try:
+        entries_before = 0
+
+        if api_cache.redis_client:
+            entries_before = api_cache.redis_client.dbsize()
+            api_cache.redis_client.flushdb()
+            cache_type = "Redis"
+        else:
+            entries_before = len(api_cache.cache)
+            api_cache.clear()
+            cache_type = "Fallback"
+
+        return {
+            "status": "success",
+            "message": f"{cache_type} cache cleared successfully",
+            "entries_cleared": entries_before,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to clear cache: {str(e)}",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
 @app.get("/api/test")
 async def test_connection():

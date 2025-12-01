@@ -142,49 +142,71 @@ class PacificaExchange(BaseExchange):
         end_ms = int(end_time.timestamp() * 1000)
         
         url = f"{self.base_url}/api/v1/funding_rate/history"
-        
+
         all_rates = []
-        offset = 0
-        limit = 200  # Pacifica API limit
-        
-        # Fetch in batches
-        while True:
+        cursor = None
+        limit = 200
+        max_iterations = 500
+        iteration = 0
+
+        # Fetch in batches using cursor pagination
+        while iteration < max_iterations:
+            iteration += 1
             params = {
                 'symbol': symbol,
-                'limit': limit,
-                'offset': offset
+                'limit': limit
             }
-            
+
+            # Add cursor if we have one from previous page
+            if cursor:
+                params['cursor'] = cursor
+
             # Rate limited request
             data = self.safe_request(url, params=params)
-            
+
             if not data or not data.get('success'):
                 self.logger.warning(f"Failed to fetch historical rates for {symbol}")
                 break
-            
+
             rates = data.get('data', [])
             if not rates:
-                # No more data available
                 break
-            
-            # Filter by time range if needed
+
+            # Filter by time range and check if we can stop early
             filtered_rates = []
+            all_out_of_range = True
+
             for rate in rates:
                 created_at = rate.get('created_at', 0)
                 if start_ms <= created_at <= end_ms:
                     filtered_rates.append(rate)
-            
+                    all_out_of_range = False
+                elif created_at < start_ms:
+                    all_out_of_range = True
+                    break
+
             all_rates.extend(filtered_rates)
-            
-            # If we got less than the limit, we've reached the end
-            if len(rates) < limit:
+
+            # Stop if we've gone past our time range (timestamps are descending)
+            if all_out_of_range and len(all_rates) > 0:
+                self.logger.info(f"Reached end of time range for {symbol}")
                 break
-            
-            # Update offset for next batch
-            offset += limit
-            
+
+            # Check API pagination fields
+            has_more = data.get('has_more', False)
+            if not has_more:
+                break
+
+            # Get cursor for next page
+            cursor = data.get('next_cursor')
+            if not cursor:
+                break
+
             # Small delay to respect rate limits
             time.sleep(0.1)
+
+        if iteration >= max_iterations:
+            self.logger.warning(f"Reached maximum iterations ({max_iterations}) for {symbol}")
         
         if not all_rates:
             return pd.DataFrame()

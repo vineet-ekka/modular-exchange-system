@@ -482,27 +482,25 @@ class HibachiExchange(BaseExchange):
                 self.logger.warning(f"No historical funding rates for {symbol}")
                 return pd.DataFrame()
             
-            # Convert to DataFrame
-            df = pd.DataFrame(data['data'])
-            
-            if df.empty:
+            # Process records manually (matches working _fetch_funding_rates pattern)
+            historical_records = []
+            for record in data['data']:
+                historical_records.append({
+                    'funding_time': pd.to_datetime(record.get('fundingTimestamp'), unit='s'),
+                    'funding_rate': float(record.get('fundingRate', 0.0)),
+                    'index_price': float(record.get('indexPrice', 0.0)) if record.get('indexPrice') else None,
+                    'mark_price': float(record.get('indexPrice', 0.0)) if record.get('indexPrice') else None,
+                    'symbol': symbol,
+                    'exchange': 'Hibachi',
+                    'base_asset': self._extract_base_asset(symbol),
+                    'quote_asset': self._extract_quote_asset(symbol),
+                    'funding_interval_hours': 8
+                })
+
+            if not historical_records:
                 return pd.DataFrame()
-            
-            # Convert timestamps
-            df['funding_time'] = pd.to_datetime(df['timestamp'], unit='s')
-            df['symbol'] = symbol
-            df['exchange'] = 'Hibachi'
-            df['base_asset'] = self._extract_base_asset(symbol)
-            df['quote_asset'] = self._extract_quote_asset(symbol)
-            df['funding_interval_hours'] = 8  # Default for Hibachi
-            
-            # Rename columns to match schema
-            df = df.rename(columns={
-                'fundingRate': 'funding_rate',
-                'indexPrice': 'index_price',
-                'markPrice': 'mark_price'
-            })
-            
+
+            df = pd.DataFrame(historical_records)
             return df
             
         except Exception as e:

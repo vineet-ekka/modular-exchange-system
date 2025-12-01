@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { debounce } from 'lodash';
+import { debounce } from 'lodash-es';
 import { Asset } from '../../types/arbitrageFilter';
 import styles from './ArbitrageFilter.module.css';
 

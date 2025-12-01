@@ -1,12 +1,13 @@
 # Multi-Exchange Cryptocurrency Funding Rate Dashboard (MVP)
 
-An MVP cryptocurrency funding rate tracking system supporting 8 exchanges with real-time updates, historical data analysis, and cross-exchange arbitrage detection.
+An MVP cryptocurrency funding rate tracking system supporting 13 exchanges (6 CEX, 7 DEX) with real-time updates, historical data analysis, and cross-exchange arbitrage detection.
 
 **Note: This is a minimum viable product (MVP) for demonstration and development purposes only. Not intended for production use.**
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Documentation](#documentation)
 - [System Overview](#system-overview)
 - [Architecture](#architecture)
 - [Features](#features)
@@ -50,12 +51,41 @@ This automatically:
 - **API Docs**: http://localhost:8000/docs
 - **PostgreSQL**: localhost:5432
 
+## Documentation
+
+This README provides a high-level overview and quickstart guide. For detailed technical documentation:
+
+- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Complete API endpoint reference
+  - 40+ REST endpoints with examples
+  - Request/response schemas
+  - Query parameters and error codes
+  - Interactive Swagger UI at http://localhost:8000/docs
+
+- **[docs/EXCHANGES.md](docs/EXCHANGES.md)** - Exchange integration details
+  - Per-exchange specifications (15 exchanges)
+  - Symbol normalization patterns
+  - Rate limits and historical data availability
+  - Exchange comparison table
+  - Guide for adding new exchanges
+
+- **[CHANGELOG.md](CHANGELOG.md)** - Development history
+  - Chronological development phases (Phase 1-34)
+  - Feature additions and improvements
+  - Critical fixes implemented
+  - System expansion milestones
+
+- **[CLAUDE.md](CLAUDE.md)** - Technical implementation guide
+  - Critical architectural patterns
+  - Non-obvious implementation details
+  - Background process coordination
+  - Performance optimization techniques
+
 ## System Overview
 
 ### Core Capabilities
-- **Multi-Exchange Collection**: Real-time funding rates from Binance, KuCoin, ByBit, Hyperliquid, Aster, Lighter, Backpack, and Drift
+- **Multi-Exchange Collection**: Real-time funding rates from 13 exchanges (Binance, KuCoin, ByBit, MEXC, Backpack, Deribit, Hyperliquid, Drift, Aster, Lighter, Pacifica, Hibachi, dYdX)
 - **Sequential Collection**: Staggered API calls to manage rate limits (0s, 30s, 120s, 180s delays)
-- **Asset Aggregation**: 656 unique assets consolidated from 2,275 individual contracts
+- **Asset Aggregation**: 700+ unique assets consolidated from 3,474 individual contracts
 - **Historical Analysis**: 30-day rolling window with automated backfill and gap detection
 - **Dashboard**: React-based interface with real-time updates and charts
 - **APR Calculations**: Automatic annualized percentage rate computation
@@ -63,13 +93,13 @@ This automatically:
 - **Redis Caching**: High-performance caching with 5s TTL for contracts, 10s for summaries
 
 ### System Statistics
-- **Total Contracts**: 2,275 perpetual futures
-- **Active Exchanges**: 8 (Binance, KuCoin, ByBit, Hyperliquid, Aster, Lighter, Backpack, Drift)
-- **Unique Assets**: 656 with cross-exchange comparison
+- **Total Contracts**: 3,474 perpetual futures
+- **Active Exchanges**: 13 (6 CEX: Binance, KuCoin, ByBit, MEXC, Backpack, Deribit; 7 DEX: Hyperliquid, Drift, Aster, Lighter, Pacifica, Hibachi, dYdX)
+- **Unique Assets**: 700+ with cross-exchange comparison
 - **Update Frequency**: 30-second real-time refresh
 - **Historical Coverage**: 30-day rolling window
-- **API Endpoints**: 25+ RESTful endpoints
-- **Database Tables**: 6 (real-time, historical, statistics, metadata, arbitrage, funding_statistics)
+- **API Endpoints**: 44 RESTful endpoints
+- **Database Tables**: 9 core tables + materialized views (real-time, historical, streaming, websocket, statistics, metadata, arbitrage, funding_statistics, query_performance)
 - **Infrastructure**: PostgreSQL database, Redis cache, pgAdmin web interface
 
 ## Architecture
@@ -142,10 +172,12 @@ This automatically:
 - **Error handling**: Comprehensive error responses
 
 #### 5. Frontend Dashboard
-- **React 19**: Modern JavaScript framework
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first CSS framework
-- **Recharts**: Interactive data visualization
+- **React 19.1.1**: Modern JavaScript framework with TypeScript 4.9.5
+- **shadcn/ui**: Component library built on Radix UI primitives
+- **TanStack Table 8**: Headless table library for data grids
+- **TanStack Query 5**: Server state management
+- **Tailwind CSS 3.4**: Utility-first CSS framework
+- **Recharts 3.1**: Interactive data visualization
 
 ## Features
 
@@ -164,23 +196,25 @@ This automatically:
 - Automated backfill scripts
 
 ### Dashboard Features
-- Asset-based grid view (656 assets)
-- Expandable rows showing individual contracts
+- **Modern Stack**: React 19.1.1 + TypeScript + shadcn/ui + TanStack Table
+- Asset-based grid view (700+ assets across 13 exchanges)
+- Expandable rows showing individual contracts with on-demand fetching
 - **Funding Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
+- **View Modes**: APR, 1H, 8H, 1D, 7D funding rate displays
 - **Enhanced Search**: Search both assets AND contracts simultaneously
 - **Auto-expansion**: Automatically expands assets when contracts match search
 - **Search Highlighting**: Matching contracts highlighted in blue
-- Multi-contract historical charts
+- Multi-contract historical charts with Recharts
 - Live funding rate ticker
 - Countdown timer to next funding
 - Color-coded rates (green positive, red negative)
-- Advanced sorting and filtering
+- Advanced sorting and filtering with TanStack Table
 - CSV export functionality
 - Settings management interface
 - Backfill progress indicator
-- Z-score statistical analysis
-- Cross-exchange arbitrage detection
-- WebSocket real-time updates
+- Z-score statistical analysis with highlighting
+- Cross-exchange arbitrage detection with enhanced filtering
+- 30-second auto-refresh with preserved UI state
 
 ### API Capabilities
 - RESTful endpoints for all data
@@ -196,56 +230,82 @@ This automatically:
 
 ### Active Exchanges
 
-#### Binance (589 contracts)
+#### Binance (600 contracts)
 | Market Type | Contracts | Funding Intervals | Features |
 |------------|-----------|-------------------|----------|
-| USD-M | 553 | 4h (64.3%), 8h (34.6%), 1h (1.0%) | USDT-margined perpetuals |
-| COIN-M | 36 | 8 hours | Coin-margined perpetuals |
+| USD-M | 572 | 4h (66.8%), 8h (28.8%), 1h (4.4%) | USDT-margined perpetuals |
+| COIN-M | 28 | 8 hours | Coin-margined perpetuals |
 
-#### KuCoin (519 contracts)
+#### KuCoin (526 contracts)
 | Funding Interval | Contracts | Percentage | Notable Examples |
 |-----------------|-----------|------------|------------------|
-| 4 hours | 324 | 62.8% | Higher frequency |
-| 8 hours | 178 | 34.5% | Standard perpetuals |
-| 1 hour | 14 | 2.7% | CARVUSDTM, XEMUSDTM |
+| 4 hours | 330 | 62.7% | Higher frequency |
+| 8 hours | 176 | 33.5% | Standard perpetuals |
+| 1 hour | 17 | 3.2% | CARVUSDTM, XEMUSDTM |
 | 2 hours | 3 | 0.6% | MAGICUSDTM |
 
-#### ByBit (663 contracts)
+#### ByBit (625 contracts)
 | Market Type | Contracts | Funding Intervals | Features |
 |------------|-----------|-------------------|----------|
-| Linear | 639 | 4h (52.3%), 8h (38.8%), 1h (5.9%), 2h (3.0%) | USDT/USDC-margined |
-| Inverse | 24 | 8h (100%) | USD-margined perpetuals |
+| Linear | 602 | 4h (52%), 8h (39%), 1h (6%), 2h (3%) | USDT/USDC-margined |
+| Inverse | 23 | 8h (100%) | USD-margined perpetuals |
 
-#### Backpack (63 contracts)
+#### Backpack (67 contracts)
 | Funding Interval | Contracts | Percentage | Features |
 |-----------------|-----------|------------|----------|
-| 1 hour | 63 | 100% | All contracts now 1-hour funding |
+| 1 hour | 67 | 100% | All contracts now 1-hour funding |
 
-#### Hyperliquid (182 contracts)
+#### Hyperliquid (184 contracts)
 | Funding Interval | Contracts | Percentage | Features |
 |-----------------|-----------|------------|----------|
-| 1 hour | 182 | 100% | Unique DEX with hourly funding |
+| 1 hour | 184 | 100% | Unique DEX with hourly funding |
 
-#### Aster (120 contracts)
+#### Aster (165 contracts)
 | Funding Interval | Contracts | Rate Limit | Features |
 |-----------------|-----------|------------|----------|
-| 4 hours | 120 | 40 req/s | DEX with async/parallel fetching, USDT pairs |
+| 4 hours | 165 | 40 req/s | DEX with async/parallel fetching, USDT pairs |
 
-#### Lighter (91 contracts)
+#### Lighter (115 contracts)
 | Funding Interval | Contracts | Platform | Features |
 |-----------------|-----------|----------|----------|
-| 8 hours | 91 | DEX Aggregator | CEX-standard equivalent, aggregates from Binance/OKX/ByBit |
+| 8 hours | 115 | DEX Aggregator | CEX-standard equivalent, aggregates from Binance/OKX/ByBit |
 
-#### Drift (48 contracts)
+#### Drift (51 contracts)
 | Funding Interval | Contracts | Platform | Features |
 |-----------------|-----------|----------|----------|
-| 1 hour | 48 | Solana | Solana-based DEX, excludes betting markets |
+| 1 hour | 51 | Solana | Solana-based DEX, excludes betting markets |
+
+#### MEXC (826 contracts)
+| Funding Interval | Contracts | Rate Limit | Features |
+|-----------------|-----------|------------|----------|
+| 8 hours | 826 | 20 req/s | CEX with bulk funding rate fetching, USDT pairs |
+
+#### Pacifica (35 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 1 hour | 35 | DEX | Pacifica Finance perpetual contracts |
+
+#### Hibachi (15 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 8 hours | 15 | DEX | Hibachi DEX perpetual contracts |
+
+#### Deribit (20 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 8 hours | 20 | CEX | Options and perpetual futures platform |
+
+#### dYdX (245 contracts)
+| Funding Interval | Contracts | Platform | Features |
+|-----------------|-----------|----------|----------|
+| 1 hour | 245 | DEX | dYdX v4 decentralized perpetual exchange |
 
 ### Ready for Integration
-- **Kraken**: 353 contracts (module available)
-- **Deribit**: 20 contracts (module available)
+- **Kraken**: 353 contracts (module available but disabled)
+- **EdgeX**: API not accessible (disabled)
+- **ApeX**: API not accessible (disabled)
 
-**Total Active**: 2,275 perpetual contracts across 656 unique assets
+**Total Active**: 3,474 perpetual contracts across 700+ unique assets
 
 ## Installation & Setup
 
@@ -286,13 +346,23 @@ docker ps  # Should show exchange_postgres, redis, and pgAdmin
 ```
 
 #### 4. Configure Environment
-Create `.env` file:
+Create `.env` file (copy from `.env.example` and configure):
 ```bash
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DATABASE=exchange_data
 POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres123
+POSTGRES_PASSWORD=your_secure_password_here
+```
+
+**Important:** You MUST set `POSTGRES_PASSWORD` to match your Docker configuration. The system will not connect to the database without a valid password.
+
+For Docker Compose, also set the environment variable or update `docker-compose.yml`:
+```bash
+# Option 1: Set environment variable
+export POSTGRES_PASSWORD=your_secure_password_here
+
+# Option 2: Create .env file in project root with POSTGRES_PASSWORD
 ```
 
 #### 5. Start Services
@@ -364,7 +434,7 @@ ACTIVE_SCHEDULE = "default"
 
 ## API Documentation
 
-### Complete API Endpoints (39 Total)
+### Complete API Endpoints (43 Total)
 
 #### Data Retrieval Endpoints
 ```bash
@@ -490,19 +560,31 @@ Response:
 
 ## Dashboard Features
 
-### Asset Grid View
-- **Consolidated Display**: 656 assets across all exchanges
-- **Multi-Exchange Columns**: Side-by-side comparison
-- **Expandable Details**: Click to see individual contracts
-- **Color Coding**: Visual indicators for rate direction
-- **Advanced Search**: 
+### Technology Stack
+- **React 19.1.1** with TypeScript 4.9.5
+- **shadcn/ui** component library (New York style) with Radix UI primitives
+- **TanStack Table 8.21.3** for headless data grid functionality
+- **TanStack React Query 5.90.10** for server state management
+- **Tailwind CSS 3.4.17** for utility-first styling
+- **Recharts 3.1.2** for data visualization
+- **Framer Motion 12.23.24** for animations
+
+### Asset Grid View (AssetFundingGridV2)
+- **Consolidated Display**: 700+ assets across 13 exchanges
+- **Multi-Exchange Columns**: Dynamic columns for all active exchanges
+- **Expandable Details**: Click to see individual contracts with on-demand fetching
+- **Color Coding**: Visual indicators for rate direction (green=positive, red=negative)
+- **View Modes**: APR, 1H, 8H, 1D, 7D funding rate displays
+- **Z-Score Highlighting**: Statistical anomaly indicators
+- **Advanced Search**:
   - Search assets by name (e.g., "BTC", "ETH")
   - Search contracts by symbol (e.g., "BTCUSDT", "XBTUSDTM")
   - Search by partial match (e.g., "USDT" finds all USDT pairs)
   - Search by exchange name (e.g., "Binance", "KuCoin")
-  - Auto-expands assets when contracts match
+  - Auto-expands assets when contracts match (300ms debounced)
   - Highlights matching contracts in blue
-- **Sorting**: Multi-column sorting with indicators
+- **Sorting**: Multi-column sorting with sticky first column
+- **Auto-refresh**: 30-second updates with preserved UI state
 
 ### Historical Data View
 - **Table Display**: Clean tabular presentation of funding rate history
@@ -533,7 +615,7 @@ modular_exchange_system/
 ├── api.py                          # FastAPI backend server
 ├── start.py                        # One-command startup script
 ├── requirements.txt                # Python dependencies
-├── docker-compose.yml              # PostgreSQL container setup
+├── docker-compose.yml              # PostgreSQL/Redis container setup
 ├── .env.example                    # Environment variables template
 │
 ├── config/                         # Configuration files
@@ -546,22 +628,84 @@ modular_exchange_system/
 │   ├── public/                     # Static assets
 │   ├── src/                        # Source code
 │   │   ├── components/             # React components
-│   │   │   ├── BackfillProgress.tsx
+│   │   │   ├── Arbitrage/          # Arbitrage filtering system
+│   │   │   │   ├── APRRangeFilter.tsx
+│   │   │   │   ├── ArbitrageFilterPanel.tsx
+│   │   │   │   ├── AssetAutocomplete.tsx
+│   │   │   │   ├── IntervalSelector.tsx
+│   │   │   │   └── LiquidityFilter.tsx
 │   │   │   ├── Cards/              # Metric display cards
+│   │   │   │   ├── APRExtremeCard.tsx
+│   │   │   │   ├── DashboardStatsCard.tsx
+│   │   │   │   ├── StatCard.tsx
+│   │   │   │   └── SystemOverviewCard.tsx
+│   │   │   ├── Charts/             # Data visualization
+│   │   │   │   ├── ArbitrageHistoricalChart.tsx
+│   │   │   │   ├── FundingChartTooltip.tsx
+│   │   │   │   └── Sparkline.tsx
 │   │   │   ├── Grid/               # Asset grid components
 │   │   │   │   ├── AssetFundingGrid.tsx
-│   │   │   │   └── HistoricalFundingView.tsx
+│   │   │   │   ├── AssetFundingGridV2/     # Primary grid (shadcn/TanStack)
+│   │   │   │   │   ├── index.tsx
+│   │   │   │   │   ├── types.ts
+│   │   │   │   │   ├── utils.ts
+│   │   │   │   │   ├── columns.tsx
+│   │   │   │   │   ├── data-table.tsx
+│   │   │   │   │   ├── ContractTable.tsx
+│   │   │   │   │   └── GridCell.tsx
+│   │   │   │   ├── ExchangeFilter/
+│   │   │   │   │   └── ExchangeFilterPanel.tsx
+│   │   │   │   ├── Historical/
+│   │   │   │   │   ├── ContractHistoricalChart.tsx
+│   │   │   │   │   ├── ContractHistoricalFilters.tsx
+│   │   │   │   │   ├── ContractHistoricalMetrics.tsx
+│   │   │   │   │   └── ContractHistoricalTable.tsx
+│   │   │   │   ├── HistoricalFundingView.tsx
+│   │   │   │   └── HistoricalFundingViewContract.tsx
 │   │   │   ├── Layout/             # Layout components
-│   │   │   ├── Settings/           # Settings management
-│   │   │   └── Ticker/             # Live ticker components
-│   │   ├── pages/                 # Page components
+│   │   │   │   └── Header.tsx
+│   │   │   ├── Ticker/             # Live ticker components
+│   │   │   │   ├── FundingCountdown.tsx
+│   │   │   │   └── LiveFundingTicker.tsx
+│   │   │   ├── ui/                 # shadcn/ui components (19 files)
+│   │   │   │   ├── badge.tsx
+│   │   │   │   ├── button.tsx
+│   │   │   │   ├── card.tsx
+│   │   │   │   ├── checkbox.tsx
+│   │   │   │   ├── input.tsx
+│   │   │   │   ├── select.tsx
+│   │   │   │   ├── skeleton.tsx
+│   │   │   │   ├── table.tsx
+│   │   │   │   └── ...
+│   │   │   ├── ArbitrageOpportunities.tsx
+│   │   │   ├── BackfillProgress.tsx
+│   │   │   ├── ContractLink.tsx
+│   │   │   └── ErrorBoundary.tsx
+│   │   ├── constants/
+│   │   │   └── exchangeMetadata.ts
+│   │   ├── hooks/                  # Custom React hooks
+│   │   │   ├── useArbitrageFilter.ts
+│   │   │   ├── useContractPreload.ts
+│   │   │   ├── useDataQueries.ts
+│   │   │   ├── useExchangeFilter.ts
+│   │   │   ├── useFilterPersistence.ts
+│   │   │   └── useFilterURL.ts
+│   │   ├── pages/                  # Page components
+│   │   │   ├── ArbitrageDetailPage.tsx
+│   │   │   ├── ArbitragePage.tsx
 │   │   │   ├── DashboardPage.tsx
 │   │   │   ├── HistoricalFundingPage.tsx
-│   │   │   └── SettingsPage.tsx
+│   │   │   └── LandingPage.tsx
 │   │   ├── services/               # API services
 │   │   │   └── api.ts
-│   │   └── App.tsx                # Main app component
+│   │   ├── utils/
+│   │   │   ├── exchangeUrlMapper.ts
+│   │   │   └── filterAlgorithms.ts
+│   │   ├── App.tsx                 # Main app component
+│   │   └── index.tsx               # Entry point with QueryClient
+│   ├── components.json            # shadcn/ui configuration
 │   ├── package.json               # Node dependencies
+│   ├── tailwind.config.js         # Tailwind CSS configuration
 │   └── tsconfig.json              # TypeScript configuration
 │
 ├── database/                      # Database management
@@ -570,22 +714,29 @@ modular_exchange_system/
 ├── data_processing/               # Data processing modules
 │   └── data_processor.py          # Transformation & APR calculation
 │
-├── exchanges/                     # Exchange integrations
+├── exchanges/                     # Exchange integrations (13 active + 3 disabled)
 │   ├── base_exchange.py           # Abstract base class
-│   ├── binance_exchange.py        # Binance integration
-│   ├── kucoin_exchange.py         # KuCoin integration
-│   ├── bybit_exchange.py          # ByBit integration
-│   ├── backpack_exchange.py       # Backpack integration
-│   ├── hyperliquid_exchange.py    # Hyperliquid integration
-│   ├── aster_exchange.py          # Aster DEX integration
-│   ├── lighter_exchange.py        # Lighter DEX aggregator integration
-│   ├── drift_exchange.py          # Drift Solana DEX integration
-│   ├── kraken_exchange.py         # Kraken (ready but disabled)
-│   ├── deribit_exchange.py        # Deribit (ready but disabled)
+│   ├── binance_exchange.py        # Binance CEX (600 contracts)
+│   ├── kucoin_exchange.py         # KuCoin CEX (526 contracts)
+│   ├── bybit_exchange.py          # ByBit CEX (625 contracts)
+│   ├── mexc_exchange.py           # MEXC CEX (826 contracts)
+│   ├── backpack_exchange.py       # Backpack CEX (67 contracts)
+│   ├── deribit_exchange.py        # Deribit CEX (20 contracts)
+│   ├── hyperliquid_exchange.py    # Hyperliquid DEX (184 contracts)
+│   ├── drift_exchange.py          # Drift DEX (51 contracts)
+│   ├── aster_exchange.py          # Aster DEX (165 contracts)
+│   ├── lighter_exchange.py        # Lighter DEX (115 contracts)
+│   ├── pacifica_exchange.py       # Pacifica DEX (35 contracts)
+│   ├── hibachi_exchange.py        # Hibachi DEX (15 contracts)
+│   ├── dydx_exchange.py           # dYdX DEX (245 contracts)
+│   ├── kraken_exchange.py         # Kraken (disabled)
+│   ├── edgex_exchange.py          # EdgeX (disabled)
+│   ├── apex_exchange.py           # ApeX (disabled)
 │   └── exchange_factory.py        # Factory pattern manager
 │
 ├── scripts/                       # Utility scripts
 │   ├── unified_historical_backfill.py    # Multi-exchange backfill
+│   ├── backfill_arbitrage_spreads_v2.py  # Arbitrage spread backfill
 │   ├── fix_funding_intervals.py          # Data maintenance
 │   └── hyperliquid_gap_filler.py         # Specific gap filling
 │
@@ -602,7 +753,16 @@ modular_exchange_system/
 │   ├── contract_monitor.py        # Contract health monitoring
 │   ├── zscore_calculator.py       # Z-score statistical analysis
 │   ├── arbitrage_scanner.py       # Cross-exchange arbitrage detection
-│   └── redis_cache.py             # Redis caching layer
+│   ├── redis_cache.py             # Redis caching layer
+│   └── terminal_dashboard.py      # CLI monitoring
+│
+├── docs/                          # Documentation
+│   ├── API_REFERENCE.md           # Complete API endpoint reference
+│   ├── EXCHANGES.md               # Exchange-specific details
+│   ├── COMMANDS_REFERENCE.md      # All operational commands
+│   ├── DOCKER_REFERENCE.md        # Container management
+│   ├── TROUBLESHOOTING.md         # Debugging guide
+│   └── MAINTENANCE.md             # Database maintenance
 │
 ├── database_tools.py              # Consolidated database utilities
 └── shutdown_dashboard.py          # Clean shutdown utility
@@ -710,6 +870,81 @@ CREATE TABLE arbitrage_spreads (
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(asset, exchange_a, exchange_b, timestamp)
 );
+
+-- Streaming data table (WebSocket feeds)
+CREATE TABLE streaming_data (
+    id SERIAL PRIMARY KEY,
+    exchange VARCHAR(50) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
+    market_type VARCHAR(20),
+    funding_rate NUMERIC(20, 10),
+    mark_price NUMERIC(20, 10),
+    index_price NUMERIC(20, 10),
+    next_funding_time TIMESTAMP WITH TIME ZONE,
+    stream_timestamp TIMESTAMP WITH TIME ZONE,
+    server_timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- WebSocket connections table
+CREATE TABLE websocket_connections (
+    id SERIAL PRIMARY KEY,
+    connection_name VARCHAR(100) NOT NULL,
+    exchange VARCHAR(50) NOT NULL,
+    market_type VARCHAR(20),
+    status VARCHAR(20) DEFAULT 'disconnected',
+    url TEXT,
+    connected_at TIMESTAMP WITH TIME ZONE,
+    disconnected_at TIMESTAMP WITH TIME ZONE,
+    messages_received INTEGER DEFAULT 0,
+    bytes_received BIGINT DEFAULT 0,
+    reconnect_count INTEGER DEFAULT 0,
+    last_message_time TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Query performance log
+CREATE TABLE query_performance_log (
+    id SERIAL PRIMARY KEY,
+    logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    query_hash TEXT,
+    query_text TEXT,
+    calls INTEGER,
+    total_time NUMERIC,
+    mean_time NUMERIC,
+    min_time NUMERIC,
+    max_time NUMERIC,
+    rows INTEGER,
+    hit_percent NUMERIC
+);
+```
+
+### Materialized Views (Pre-computed for Performance)
+
+```sql
+-- Asset-level aggregations
+CREATE MATERIALIZED VIEW mv_grouped_funding_rates AS
+SELECT base_asset, COUNT(*) as contract_count,
+       AVG(apr) as avg_apr, SUM(open_interest) as total_oi
+FROM exchange_data GROUP BY base_asset;
+
+-- Top funding rates
+CREATE MATERIALIZED VIEW mv_top_funding_rates AS
+SELECT * FROM exchange_data ORDER BY apr DESC LIMIT 100;
+
+-- Per-exchange summaries
+CREATE MATERIALIZED VIEW mv_exchange_stats AS
+SELECT exchange, COUNT(DISTINCT symbol) as symbol_count,
+       COUNT(DISTINCT base_asset) as asset_count, AVG(apr) as avg_apr
+FROM exchange_data GROUP BY exchange;
+
+-- Arbitrage spread statistics
+CREATE MATERIALIZED VIEW mv_arbitrage_spread_stats AS
+SELECT asset, exchange_a, exchange_b,
+       AVG(apr_spread) as mean_spread, STDDEV(apr_spread) as stddev_spread,
+       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY apr_spread) as median_spread
+FROM arbitrage_spreads GROUP BY asset, exchange_a, exchange_b;
 ```
 
 ## Technical Implementation
@@ -839,215 +1074,32 @@ elif funding_interval_hours == 8:
 
 ## Development History
 
-### Phase Timeline
+For detailed development history organized by phase, see **[CHANGELOG.md](CHANGELOG.md)**.
 
-#### Phase 1-4: Core System (2025-08-07)
-- Binance integration with 541 contracts
-- PostgreSQL database setup
-- FastAPI backend implementation
-- React dashboard foundation
-- Historical data collection system
+**Recent Major Milestones:**
+- **Phase 34** (2025-10-13): ByBit (663 contracts) and Lighter (91 contracts) integration, enhanced dashboard filtering
+- **Phase 33** (2025-09-23): Redis cache implementation with graceful fallback
+- **Phase 32** (2025-09-20): Aster and Drift DEX integration, system expanded to 1,403 contracts
+- **Phase 31** (2025-09-15): Arbitrage detection system with cross-exchange scanning
+- **Phase 30** (2025-09-03): Z-score statistical monitoring with zone-based updates
+- **Phase 1-29** (2025-08-07 to 2025-08-29): Core system development, multi-exchange support, dashboard enhancements
 
-#### Phase 5: Asset Grid View (2025-08-08)
-- Simplified from 1400+ contracts to 600+ assets
-- CoinGlass-inspired interface design
-- One-command startup implementation
-
-#### Phase 6: Enhanced Historical Page (2025-08-11)
-- Live funding ticker
-- Countdown timer to next funding
-- Combined chart and table view
-
-#### Phase 7-10: System Improvements (2025-08-12)
-- Critical funding interval detection fix
-- Multi-contract chart enhancements
-- Backfill progress indicator
-- Dashboard shutdown button
-- APR display implementation
-- Dynamic OI units
-
-#### Phase 11-12: Multi-Exchange Support (2025-08-13)
-- KuCoin integration (472 contracts)
-- Sequential collection implementation
-- Symbol normalization (XBT → BTC)
-- Unified backfill scripts
-
-#### Phase 13: Settings Management (2025-08-14)
-- Web-based settings interface
-- Hot-reload configuration
-- Backup/restore functionality
-- Import/export settings
-
-#### Phase 14: Backpack Integration (2025-08-15)
-- 39 perpetual contracts added
-- Historical backfill implementation
-- Chart and data fixes
-
-#### Phase 15: Hyperliquid Integration (2025-08-18)
-- 173 DEX perpetual contracts
-- 1-hour funding intervals
-- Open interest USD conversion
-- API fixes for contract naming (2025-08-27)
-
-#### Phase 21: Base Asset Normalization (2025-08-28)
-- Fixed prefix token normalization across all exchanges
-- Unified asset display (no more duplicates like "1000BONK" and "BONK")
-- Proper handling of all prefix patterns:
-  - Binance: `1000` and `1000000` prefixes
-  - KuCoin: `1000000`, `10000`, and `1000` prefixes (checked in order)
-  - Hyperliquid & Backpack: `k` prefix tokens
-- Fixed edge cases like `10000CATUSDTM` → `CAT`, `1000000MOGUSDTM` → `MOG`
-
-#### Phase 22: Dashboard Search Enhancement (2025-08-28)
-- **Enhanced Search Functionality**: Can now search both assets and contracts
-- **Auto-Expansion**: Assets automatically expand when contracts match search
-- **Visual Highlighting**: Matching contracts highlighted with blue border
-- **Search Modes**: Search by asset name, contract symbol, exchange, or partial matches
-- **Pre-fetching**: All contract data pre-loaded for instant search results
-
-#### Phase 23: Data Collector Reliability (2025-08-28)
-- **Improved Startup**: Better error handling in `start.py`
-- **Process Monitoring**: Verifies data collector starts successfully
-- **Logging Support**: Output redirected to `data_collector.log`
-- **Windows Compatibility**: Fixed console window issues on Windows
-- **Status Feedback**: Clear indication if collector fails to start
-
-#### Phase 24: Documentation Enhancement (2025-08-28)
-- **Enhanced CLAUDE.md**: Improved guidance for Claude Code instances
-- **Background Process Monitoring**: Added instructions for managing background processes
-- **Windows Support**: Better Windows-specific commands and alternatives
-- **Dependency Clarity**: Added missing package installations (fastapi, uvicorn, psutil)
-- **Troubleshooting**: Expanded debugging and status checking commands
-
-#### Phase 25: 1000X Token Normalization Fix (2025-08-28)
-- **Fixed 1000X token**: Special handling for KuCoin's 1000XUSDTM contract
-- **Normalization**: 1000X correctly normalized to "X" (representing X token with 1000x denomination)
-- **Unified display**: X token now appears consistently across Binance and KuCoin
-- **Edge case handling**: Added explicit check for baseCurrency='1000X' from KuCoin API
-
-#### Phase 26: 1MBABYDOGE Normalization (2025-08-29)
-- **Added 1MBABYDOGE normalization**: 1M denomination (1 Million) now properly handled
-- **Normalization**: `1MBABYDOGEUSDT` and `1MBABYDOGEUSDTM` → `BABYDOGE`
-- **Unified display**: Both Binance and KuCoin 1MBABYDOGE contracts now grouped under BABYDOGE asset
-- **Denomination recognition**: System correctly identifies 1M as a denomination prefix like 1000, 10000, etc.
-
-#### Phase 27: Step Function Chart Implementation (2025-08-29)
-- **Chart Accuracy**: Replaced smooth curves with step functions for funding rates
-- **Interval Detection**: Automatically detects funding intervals (1h, 2h, 4h, 8h)
-- **Forward Fill**: Properly handles null values with last known values
-- **Enhanced Tooltips**: Shows funding interval, change percentage, and data type
-- **Visual Indicators**: Reference lines at actual funding update times
-- **Performance**: Disabled animations for better performance with 720+ data points
-
-#### Phase 28: Dashboard Refresh Fix (2025-08-29)
-- **Fixed Stuck Backfill**: Corrected backfill status file preventing infinite polling
-- **Smart Polling Logic**: BackfillProgress component now stops polling at 100% progress
-- **API Auto-fix**: Backfill status endpoint automatically corrects inconsistent states
-- **Removed Pre-fetch**: Eliminated automatic fetching of 600+ assets on mount
-- **Performance Boost**: Reduced API calls from ~720/hour to ~120/hour (83% reduction)
-- **Smart Search**: Added debounced search with on-demand contract fetching
-
-#### Phase 29: Funding Interval Display (2025-08-29)
-- **Contract Details Enhancement**: Added funding interval column to expanded contract view
-- **Clear Interval Display**: Shows funding frequency (1h, 2h, 4h, 8h) for each contract
-- **API Update**: Modified `/api/funding-rates-grid` endpoint to include funding_interval_hours
-- **Clean UI**: Interval shown only in contract details table for clarity
-- **Essential Information**: Helps traders understand holding costs and funding payment frequency
-
-#### Phase 16-20: Recent Improvements (2025-08-21)
-- Synchronized historical windows
-- Bug fixes for historical page
-- Contract-specific countdown timers
-- X-axis improvements for charts
-- Performance optimizations
-
-#### Phase 30: Z-Score Statistical Monitoring (2025-09-03 - Completed)
-- **Statistical Analysis**: Z-score calculations for all funding rates
-- **New Database Tables**: `funding_statistics`, `contract_metadata`
-- **Zone-based Updates**: Active zones (|Z|>2) update every 30s, stable every 2min
-- **Parallel Processing**: <1s calculation for all 1,297 contracts
-- **API Endpoints**: `/api/contracts-with-zscores`, `/api/zscore-summary`
-- **Percentile Rankings**: Distribution-independent statistical measures
-- **Performance Optimized**: <100ms API response times
-
-#### Phase 31: Arbitrage Detection System (2025-09-15 - Completed)
-- **Cross-Exchange Scanning**: Real-time arbitrage opportunity detection
-- **APR Spread Calculation**: Automatic spread and profit calculations
-- **New Database Table**: `arbitrage_spreads` for opportunity tracking
-- **API Endpoint**: `/api/arbitrage/opportunities` with filtering
-- **Historical Tracking**: Spread statistics over time
-- **Redis Caching**: 5s TTL for performance optimization
-
-#### Phase 32: Aster and Drift Exchange Integration (2025-09-20 - Completed)
-- **Aster DEX Integration**: 102 perpetual contracts with 4-hour funding intervals
-- **Drift Solana DEX**: 61 perpetual contracts with 1-hour funding intervals
-- **Symbol Normalization**: Handle Aster prefixes (1000FLOKI → FLOKI, kX → X)
-- **Drift Normalization**: Remove -PERP suffix, handle 1M/1K prefixes (1MBONK → BONK)
-- **Rate Limiting**: Aster at 40 req/s max, Drift with no strict limits
-- **Parallel Fetching**: Optimized async/await for both exchanges
-- **Total Contracts**: System expanded to 1,403 across 6 exchanges
-
-#### Phase 33: Redis Cache Implementation (2025-09-23 - Completed)
-- **Redis Integration**: High-performance caching layer
-- **TTL Strategy**: 5s for contracts, 10s for summary data
-- **Memory Limit**: 512MB with LRU eviction policy
-- **Fallback**: Graceful degradation to in-memory cache if Redis unavailable
-- **Performance**: <100ms API response times with caching
-
-#### Phase 34: ByBit and Lighter Exchange Integration (2025-10-13 - Completed)
-- **ByBit Integration**: 663 perpetual contracts (largest single exchange addition)
-  - 639 linear perpetual contracts (USDT/USDC-margined)
-  - 24 inverse perpetual contracts (USD-margined)
-  - V5 API with cursor-based pagination
-  - Mixed funding intervals: 4h (52.3%), 8h (38.8%), 1h (5.9%), 2h (3.0%)
-  - Rate limit: 50 req/s with automatic pagination handling
-  - Base asset normalization handles up to 8-digit multiplier prefixes
-- **Lighter Integration**: 91 contracts from DEX aggregator
-  - Aggregates funding rates from Binance, OKX, and ByBit
-  - 8-hour CEX-standard equivalent rate format
-  - Unique market_id system for contract identification
-  - 1-hour resolution historical data support
-  - Rate conversion logic for CEX-standard alignment
-- **Enhanced Dashboard Features**:
-  - Exchange Filter System with multi-select and persistence
-  - Custom hooks (useExchangeFilter, useFilterPersistence, useFilterURL)
-  - New UI cards (APRExtremeCard, DashboardStatsCard, SystemOverviewCard)
-  - Arbitrage Historical Chart component
-  - Modern UI components (ModernMultiSelect, ModernPagination, ModernTooltip)
-  - Filter state synchronization with URL parameters and localStorage
-- **System Expansion**: Total contracts increased from 1,403 to 2,275 (+62%)
-- **Asset Coverage**: Unique assets expanded from 600+ to 656
-
-### Critical Fixes Implemented
-1. **Funding Interval Detection**: Fixed 333 contracts with incorrect APR
-2. **Multi-Contract Chart Alignment**: Timestamp normalization
-3. **COIN-M Contract Display**: Base asset extraction
-4. **Historical Data Completeness**: Zero value handling
-5. **Open Interest Display**: Dynamic unit formatting
-6. **Base Asset Normalization**: Fixed duplicate assets in dashboard (e.g., "1000BONK" and "BONK" now unified)
-7. **Dashboard Search**: Can now search both assets and contracts with auto-expansion
-8. **Data Collector Startup**: Improved reliability with logging and error handling
-9. **Documentation Enhancement**: Improved CLAUDE.md for better Claude Code integration
-10. **1000X Token Fix**: Correctly normalizes KuCoin's 1000XUSDTM to "X" instead of "1000X"
-11. **1MBABYDOGE Normalization**: Added support for 1M (1 Million) denomination prefix
-12. **Step Function Charts**: Accurate representation of funding rate changes with proper intervals
-13. **Dashboard Refresh Fix**: Eliminated constant refreshing from stuck backfill status
-14. **Funding Interval Display**: Added clear display of funding frequency for each contract
+The system has evolved through 34+ development phases, starting from Binance-only integration (541 contracts) to the current multi-exchange system with 3,474 contracts across 13 exchanges.
 
 ## Performance Metrics
 
 ### System Performance
-- **Total Contracts**: 2,275 across 8 exchanges
-- **Unique Assets**: 656 consolidated view
+- **Total Contracts**: 3,474 across 13 exchanges
+- **Unique Assets**: 700+ consolidated view
 - **Update Cycle**: 30 seconds with parallel collection (default)
 - **API Response**: <100ms with Redis caching
 - **Dashboard Load**: ~2 seconds initial
 - **Chart Rendering**: Smooth with forward-fill normalization
 - **Z-Score Calculation**: <1s for all contracts (parallel processing)
-- **Cache Performance**: 5s TTL contracts, 10s summaries
+- **Cache Performance**: 5s TTL contracts, 10s summaries, 30s arbitrage
 
 ### Data Metrics
-- **Historical Records**: 354,749+ total (including 85,368 Hyperliquid records)
+- **Historical Records**: 400,000+ total across all exchanges
 - **Data Completeness**: 100% (gaps filled)
 - **Backfill Speed**: ~5-7 minutes for 30 days
 - **Database Size**: ~5GB with full history
@@ -1055,8 +1107,8 @@ elif funding_interval_hours == 8:
 
 ### Current Status (MVP)
 - **Uptime**: System runs continuously when started
-- **Error Recovery**: Basic retry mechanisms in place
-- **Data Collection**: Functional across 8 exchanges
+- **Error Recovery**: Circuit breaker pattern with graceful fallback
+- **Data Collection**: Functional across 13 exchanges (6 CEX, 7 DEX)
 - **Known Limitations**: This is an MVP with basic functionality
 
 ## Troubleshooting
@@ -1310,10 +1362,10 @@ python scripts/unified_historical_backfill.py --days 30 --parallel --loop-hourly
 
 ---
 
-*Last Updated: 2025-10-13*
+*Last Updated: 2025-12-01*
 *Version: MVP*
-*Total Contracts: 2,275*
-*Active Exchanges: 8*
-*Unique Assets: 656*
+*Total Contracts: 3,474*
+*Active Exchanges: 13 (6 CEX, 7 DEX)*
+*Unique Assets: 700+*
 *Project Status: MVP - Not production ready*
 *Note: This is a minimum viable product for demonstration and development purposes*

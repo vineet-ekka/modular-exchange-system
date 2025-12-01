@@ -4,6 +4,7 @@ These indexes are critical for the batch Z-score calculation performance.
 """
 
 import psycopg2
+from psycopg2 import sql
 import os
 import time
 from dotenv import load_dotenv
@@ -24,6 +25,14 @@ def create_indexes():
     cur = conn.cursor()
 
     indexes = [
+        # Critical standalone index for time-based queries in backfill operations
+        {
+            'name': 'idx_historical_funding_time_only',
+            'table': 'funding_rates_historical',
+            'columns': '(funding_time DESC)',
+            'where': 'WHERE funding_rate IS NOT NULL',
+            'description': 'Optimize time-range filtering for backfill and historical queries'
+        },
         # Critical for batch Z-score calculation - self-join optimization
         {
             'name': 'idx_historical_pair_lookup',
@@ -111,7 +120,7 @@ def create_indexes():
             print(f"Creating index {index['name']}...")
             print(f"  Description: {index['description']}")
 
-            sql = f"""
+            create_index_sql = f"""
                 CREATE INDEX IF NOT EXISTS {index['name']}
                 ON {index['table']} {index['columns']}
                 {index['where']}
@@ -119,7 +128,7 @@ def create_indexes():
 
             start_time = time.time()
             try:
-                cur.execute(sql)
+                cur.execute(create_index_sql)
                 conn.commit()
                 elapsed = time.time() - start_time
                 print(f"  [SUCCESS] Created in {elapsed:.2f} seconds")
@@ -133,7 +142,7 @@ def create_indexes():
     tables = ['funding_rates_historical', 'exchange_data', 'funding_statistics']
     for table in tables:
         try:
-            cur.execute(f"ANALYZE {table}")
+            cur.execute(sql.SQL("ANALYZE {}").format(sql.Identifier(table)))
             conn.commit()
             print(f"  [SUCCESS] Analyzed {table}")
         except Exception as e:
@@ -142,12 +151,15 @@ def create_indexes():
     # Get table sizes for context
     print("\nTable Statistics:")
     for table in ['funding_rates_historical', 'exchange_data']:
-        cur.execute(f"""
+        cur.execute(sql.SQL("""
             SELECT
                 COUNT(*) as row_count,
-                pg_size_pretty(pg_total_relation_size('{table}')) as total_size
-            FROM {table}
-        """)
+                pg_size_pretty(pg_total_relation_size({table_lit}::regclass)) as total_size
+            FROM {table_id}
+        """).format(
+            table_lit=sql.Literal(table),
+            table_id=sql.Identifier(table)
+        ))
         row_count, size = cur.fetchone()
         print(f"  {table}: {row_count:,} rows, {size}")
 

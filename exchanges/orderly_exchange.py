@@ -51,16 +51,20 @@ class OrderlyExchange(BaseExchange):
 
             self.logger.info(f"Found {len(perp_instruments)} perpetual contracts")
 
+            # Fetch ALL open interests in a single batch call
+            oi_map = self._fetch_all_open_interests()
+            self.logger.info(f"Fetched open interest data for {len(oi_map)} contracts")
+
             # Fetch funding rates for each perpetual
             all_data = []
             for instrument in perp_instruments:
                 symbol = instrument['symbol']
-                
+
                 # Get current funding rate
                 funding_data = self._fetch_funding_rate(symbol)
                 if funding_data:
-                    # Get open interest
-                    open_interest = self._fetch_open_interest(symbol)
+                    # Get open interest from pre-fetched batch data
+                    open_interest = oi_map.get(symbol, 0.0)
                     
                     # Combine data
                     combined_data = {
@@ -131,29 +135,32 @@ class OrderlyExchange(BaseExchange):
             self.logger.error(f"Error fetching funding rate for {symbol}: {e}")
             return None
 
-    def _fetch_open_interest(self, symbol: str) -> Optional[float]:
+    def _fetch_all_open_interests(self) -> Dict[str, float]:
         """
-        Fetch open interest for a symbol.
-        
-        Args:
-            symbol: Trading symbol
-            
+        Fetch open interest for ALL symbols in a single API call.
+
         Returns:
-            Open interest value or None
+            Dictionary mapping symbol to open interest value
         """
         try:
             url = f"{self.base_url}/v1/public/market_info/traders_open_interests"
-            params = {'symbol': symbol}
-            
-            data = self.safe_request(url, params=params)
-            
+            data = self.safe_request(url)
+
             if data and data.get('success') and 'data' in data:
-                return data['data'].get('open_interest', 0)
-            return None
-            
+                rows = data['data'].get('rows', [])
+                oi_map = {}
+                for row in rows:
+                    symbol = row.get('symbol')
+                    long_oi = row.get('long_oi', 0)
+                    short_oi = row.get('short_oi', 0)
+                    if symbol:
+                        oi_map[symbol] = abs(long_oi)
+                return oi_map
+            return {}
+
         except Exception as e:
-            self.logger.error(f"Error fetching open interest for {symbol}: {e}")
-            return None
+            self.logger.error(f"Error fetching open interests: {e}")
+            return {}
 
     def normalize_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -254,11 +261,11 @@ class OrderlyExchange(BaseExchange):
     def fetch_historical_funding_rates(self, symbol: str, days: int = 30) -> pd.DataFrame:
         """
         Fetch historical funding rates for a symbol.
-        
+
         Args:
             symbol: Trading symbol
             days: Number of days to fetch
-            
+
         Returns:
             DataFrame with historical funding rates
         """
@@ -268,19 +275,153 @@ class OrderlyExchange(BaseExchange):
                 'symbol': symbol,
                 'limit': min(days * 3, 1000)  # 3 funding periods per day, max 1000
             }
-            
+
             data = self.safe_request(url, params=params)
-            
+
             if data and data.get('success') and 'data' in data:
                 rows = data['data'].get('rows', [])
                 if rows:
                     df = pd.DataFrame(rows)
                     df['funding_time'] = pd.to_datetime(df['funding_rate_timestamp'], unit='ms', errors='coerce')
                     df['funding_rate'] = df['funding_rate'].astype(float)
+                    df['symbol'] = symbol
                     return df[['symbol', 'funding_rate', 'funding_time']]
-            
+
             return pd.DataFrame()
 
         except Exception as e:
             self.logger.error(f"Error fetching historical funding rates for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _extract_base_asset(self, symbol: str) -> str:
+        """
+        Extract base asset from Orderly symbol.
+
+        Args:
+            symbol: Trading symbol (e.g., 'PERP_BTC_USDC' or 'PERP_1000SHIB_USDC')
+
+        Returns:
+            Base asset with numerical prefixes removed (e.g., 'BTC' or 'SHIB')
+        """
+        if not symbol:
+            return symbol
+
+        symbol_str = str(symbol)
+
+        if symbol_str.startswith('PERP_'):
+            parts = symbol_str[5:].split('_')
+            if len(parts) >= 2:
+                base_asset = parts[0]
+
+                prefixes_to_remove = [
+                    '1000000',
+                    '100000',
+                    '10000',
+                    '1000',
+                    '100',
+                    '10',
+                ]
+
+                for prefix in prefixes_to_remove:
+                    if base_asset.startswith(prefix):
+                        return base_asset[len(prefix):]
+
+                return base_asset
+
+        return symbol_str
+
+    def _extract_quote_asset(self, symbol: str) -> str:
+        """
+        Extract quote asset from Orderly symbol.
+
+        Args:
+            symbol: Trading symbol (e.g., 'PERP_BTC_USDC')
+
+        Returns:
+            Quote asset (e.g., 'USDC')
+        """
+        if not symbol:
+            return ''
+
+        symbol_str = str(symbol)
+
+        if symbol_str.startswith('PERP_'):
+            parts = symbol_str[5:].split('_')
+            if len(parts) >= 2:
+                return parts[-1]
+
+        return ''
+
+    def fetch_all_perpetuals_historical(self, days: int = 30,
+                                       batch_size: int = 10,
+                                       progress_callback=None,
+                                       start_time: Optional[datetime] = None,
+                                       end_time: Optional[datetime] = None) -> pd.DataFrame:
+        """
+        Fetch historical funding rates for all perpetual contracts.
+
+        Args:
+            days: Number of days of historical data to fetch
+            batch_size: Number of symbols to fetch concurrently (unused, kept for compatibility)
+            progress_callback: Callback for progress updates
+            start_time: Optional start time (unused, Orderly API uses limit parameter)
+            end_time: Optional end time (unused, Orderly API uses limit parameter)
+
+        Returns:
+            Combined DataFrame with all historical funding rates
+        """
+        try:
+            instruments_data = self._fetch_instruments()
+            if not instruments_data:
+                self.logger.warning("No instruments found")
+                return pd.DataFrame()
+
+            perp_symbols = [inst['symbol'] for inst in instruments_data
+                          if inst.get('symbol_type') == 'PERP' or 'PERP' in inst.get('symbol', '')]
+
+            if not perp_symbols:
+                self.logger.warning("No perpetual symbols found")
+                return pd.DataFrame()
+
+            self.logger.info(f"Fetching historical data for {len(perp_symbols)} perpetual contracts")
+
+            all_historical_data = []
+            total_symbols = len(perp_symbols)
+
+            for i, symbol in enumerate(perp_symbols):
+                try:
+                    df = self.fetch_historical_funding_rates(symbol, days)
+                    if not df.empty:
+                        df['exchange'] = 'Orderly'
+                        df['funding_interval_hours'] = 8
+
+                        base_asset = self._extract_base_asset(symbol)
+                        quote_asset = self._extract_quote_asset(symbol)
+
+                        df['base_asset'] = base_asset
+                        df['quote_asset'] = quote_asset
+
+                        all_historical_data.append(df)
+                        self.logger.debug(f"Fetched {len(df)} records for {symbol}")
+
+                    if progress_callback:
+                        progress = ((i + 1) / total_symbols) * 100
+                        progress_callback(i + 1, total_symbols, progress, f"Processing {symbol}")
+
+                    time.sleep(0.1)
+
+                except Exception as e:
+                    self.logger.error(f"Error fetching historical data for {symbol}: {str(e)}")
+                    continue
+
+            if all_historical_data:
+                combined_df = pd.concat(all_historical_data, ignore_index=True)
+                self.logger.info(f"Completed: fetched {len(combined_df)} total historical records")
+                return combined_df
+            else:
+                self.logger.warning("No historical data fetched")
+                return pd.DataFrame()
+
+        except Exception as e:
+            self.logger.error(f"Error in fetch_all_perpetuals_historical: {str(e)}")
             return pd.DataFrame()

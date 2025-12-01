@@ -1,13 +1,13 @@
 import { AssetGridData } from '../types/exchangeFilter';
+import { ContractDetails } from '../services/api';
+
+export type SearchIndex = Map<string, Set<string>>;
 
 export const getVisibleExchanges = (
   allExchanges: string[],
   selectedExchanges: Set<string>
 ): string[] => {
   const visible = allExchanges.filter(ex => selectedExchanges.has(ex));
-  console.log('[VISIBLE] allExchanges:', allExchanges.length, allExchanges);
-  console.log('[VISIBLE] selectedExchanges:', selectedExchanges.size, [...selectedExchanges].sort());
-  console.log('[VISIBLE] visibleExchanges:', visible.length, visible);
   return visible;
 };
 
@@ -38,3 +38,40 @@ export const filterAssetsByCrossListed = (
     });
   });
 };
+
+export function createSearchIndex(
+  assets: AssetGridData[],
+  contracts: Record<string, ContractDetails[]>
+): SearchIndex {
+  const index = new Map<string, Set<string>>();
+
+  assets.forEach((asset) => {
+    const searchTerms = new Set<string>();
+    searchTerms.add(asset.asset.toLowerCase());
+
+    const assetContracts = contracts[asset.asset] || [];
+    assetContracts.forEach((contract) => {
+      searchTerms.add(contract.symbol.toLowerCase());
+    });
+
+    index.set(asset.asset, searchTerms);
+  });
+
+  return index;
+}
+
+export function searchWithIndex(
+  searchTerm: string,
+  assets: AssetGridData[],
+  index: SearchIndex
+): AssetGridData[] {
+  if (!searchTerm || searchTerm.length < 2) return assets;
+
+  const searchLower = searchTerm.toLowerCase();
+
+  return assets.filter((asset) => {
+    const terms = index.get(asset.asset);
+    if (!terms) return false;
+    return Array.from(terms).some((term) => term.includes(searchLower));
+  });
+}

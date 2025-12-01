@@ -1,5 +1,5 @@
 import React from 'react';
-import ModernCard from '../Modern/ModernCard';
+import { Card } from '../ui/card';
 
 interface SystemOverviewCardProps {
   totalContracts: number;
@@ -16,7 +16,7 @@ const SystemOverviewCard: React.FC<SystemOverviewCardProps> = ({
 }) => {
   if (loading) {
     return (
-      <ModernCard variant="elevated" padding="lg">
+      <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
         <div className="space-y-4">
           <div className="skeleton h-5 w-32" />
           <div className="grid grid-cols-3 gap-6">
@@ -25,7 +25,7 @@ const SystemOverviewCard: React.FC<SystemOverviewCardProps> = ({
             <div className="skeleton h-12 w-full" />
           </div>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
@@ -45,7 +45,7 @@ const SystemOverviewCard: React.FC<SystemOverviewCardProps> = ({
   ];
 
   return (
-    <ModernCard variant="elevated" padding="lg">
+    <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
       <div className="space-y-4">
         <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wider">
           System Overview
@@ -65,7 +65,7 @@ const SystemOverviewCard: React.FC<SystemOverviewCardProps> = ({
           ))}
         </div>
       </div>
-    </ModernCard>
+    </Card>
   );
 };
 

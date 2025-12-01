@@ -1260,19 +1260,25 @@ def main():
     )
 
     logger = setup_logger("ZScoreCalculatorMain")
-    logger.info("Starting Z-score calculator service...")
+    logger.info("Starting Z-score calculator service with zone-based scheduling...")
 
-    # Configuration
-    UPDATE_INTERVAL = 60  # Update every 60 seconds
-    ERROR_RETRY_DELAY = 30  # Wait 30 seconds after error
+    from config.settings import (
+        ZSCORE_CALCULATION_INTERVAL,
+        ZSCORE_ACTIVE_ZONE_INTERVAL,
+        ZSCORE_STABLE_ZONE_INTERVAL
+    )
+    ERROR_RETRY_DELAY = 30
 
-    # Statistics
     update_count = 0
     error_count = 0
+    last_active_update = 0
+    last_stable_update = 0
+    first_run = True
+    check_interval = min(ZSCORE_ACTIVE_ZONE_INTERVAL, ZSCORE_STABLE_ZONE_INTERVAL) / 2
 
     while True:
         try:
-            # Get database connection
+            current_time = time.time()
             conn = psycopg2.connect(
                 host=POSTGRES_HOST,
                 port=POSTGRES_PORT,
@@ -1280,46 +1286,37 @@ def main():
                 user=POSTGRES_USER,
                 password=POSTGRES_PASSWORD
             )
-
-            # Create calculator instance
             calculator = ZScoreCalculator(conn, window_days=30)
 
-            # Process all contracts
-            logger.info("Calculating Z-scores for all contracts...")
-            start_time = time.time()
+            if first_run:
+                logger.info("Initial full update of all contracts to establish zones...")
+                result = calculator.process_all_contracts()
+                logger.info(f"Initial update: {result.get('processed', 0)} contracts in {result.get('duration_seconds', 0):.2f}s")
+                last_active_update = current_time
+                last_stable_update = current_time
+                first_run = False
+                update_count += 1
+            else:
+                if current_time - last_active_update >= ZSCORE_ACTIVE_ZONE_INTERVAL:
+                    logger.info("Updating active zone contracts (|Z| > 2.0)...")
+                    result = calculator.process_contracts_by_zone('active')
+                    logger.info(f"Active zone: {result.get('processed', 0)} contracts in {result.get('duration_seconds', 0):.2f}s")
+                    last_active_update = current_time
+                    update_count += 1
 
-            # Get all unique contracts
-            query = """
-                SELECT DISTINCT exchange, symbol
-                FROM exchange_data
-                WHERE funding_rate IS NOT NULL
-                ORDER BY exchange, symbol
-            """
-            calculator.cursor.execute(query)
-            contracts = calculator.cursor.fetchall()
+                if current_time - last_stable_update >= ZSCORE_STABLE_ZONE_INTERVAL:
+                    logger.info("Updating stable zone contracts (|Z| <= 2.0)...")
+                    result = calculator.process_contracts_by_zone('stable')
+                    logger.info(f"Stable zone: {result.get('processed', 0)} contracts in {result.get('duration_seconds', 0):.2f}s")
+                    last_stable_update = current_time
+                    update_count += 1
 
-            processed = 0
-            for exchange, symbol in contracts:
-                try:
-                    calculator.calculate_zscore(exchange, symbol)
-                    processed += 1
-                except Exception as e:
-                    logger.debug(f"Error processing {exchange} {symbol}: {e}")
-
-            duration = time.time() - start_time
-            update_count += 1
-
-            logger.info(f"Update #{update_count}: Processed {processed}/{len(contracts)} contracts in {duration:.2f}s")
-
-            # Close connection
             conn.close()
 
-            # Print status every 10 updates
-            if update_count % 10 == 0:
-                logger.info(f"Status: {update_count} successful updates, {error_count} errors")
+            if update_count % 20 == 0:
+                logger.info(f"Status: {update_count} zone updates, {error_count} errors")
 
-            # Wait before next update
-            time.sleep(UPDATE_INTERVAL)
+            time.sleep(check_interval)
 
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, shutting down...")

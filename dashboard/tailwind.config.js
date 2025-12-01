@@ -47,18 +47,53 @@ module.exports = {
         '32': '256px',
       },
       borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
         'none': '0',
-        'sm': '2px',
         DEFAULT: '4px',
-        'md': '6px',
-        'lg': '8px',
         'xl': '12px',
         '2xl': '16px',
         '3xl': '24px',
         'full': '9999px',
       },
       colors: {
-        // Modern color system
+        // shadcn CSS variables
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+
+        // Modern color system (kept for backward compatibility during migration)
         white: '#FFFFFF',
         black: '#000000',
 
@@ -78,20 +113,6 @@ module.exports = {
           950: '#0A0A0A'
         },
 
-        // Primary brand color
-        primary: {
-          50: '#EFF6FF',
-          100: '#DBEAFE',
-          200: '#BFDBFE',
-          300: '#93C5FD',
-          400: '#60A5FA',
-          500: '#3B82F6',
-          DEFAULT: '#0066FF', // Electric blue
-          600: '#0052CC',
-          700: '#0040A0',
-          800: '#003074',
-          900: '#002048'
-        },
 
         // Success (Emerald)
         success: {
@@ -140,9 +161,9 @@ module.exports = {
 
         // Info
         info: {
-          DEFAULT: '#3B82F6',
-          light: '#60A5FA',
-          dark: '#2563EB'
+          DEFAULT: '#0ea5e9',
+          light: '#38bdf8',
+          dark: '#0284c7'
         },
 
         // Premium (Violet)
@@ -190,7 +211,7 @@ module.exports = {
           DEFAULT: '#E5E5E5',
           light: '#F5F5F5',
           dark: '#D4D4D4',
-          focus: '#0066FF'
+          focus: '#0ea5e9'
         },
 
         // Data visualization colors
@@ -201,7 +222,7 @@ module.exports = {
         },
 
         chart: {
-          primary: '#0066FF',
+          primary: '#0ea5e9',
           secondary: '#8B5CF6',
           tertiary: '#F59E0B',
           quaternary: '#10B981',

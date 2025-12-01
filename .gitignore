@@ -147,3 +147,7 @@ build/
 .parcel-cache/
 .vite/
 *.tsbuildinfo
+
+# Test artifacts
+dashboard/test_results.txt
+dashboard/lighthouse-report.json

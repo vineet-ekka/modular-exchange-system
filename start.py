@@ -15,6 +15,7 @@ from pathlib import Path
 import json
 import shutil
 import threading
+import argparse
 
 # Force unbuffered output for immediate display
 if hasattr(sys.stdout, 'reconfigure'):
@@ -576,7 +577,7 @@ def start_zscore_calculator():
 
 
 def start_background_historical_backfill():
-    """Start 7-day historical backfill in background thread."""
+    """Start 30-day historical backfill in background thread."""
     lock_file = Path(".backfill.lock")
     
     def _run_backfill():
@@ -642,6 +643,36 @@ def open_dashboard():
     time.sleep(2)
     webbrowser.open("http://localhost:3000")
 
+def launch_terminal_dashboard():
+    """Launch terminal dashboard in a new window."""
+    try:
+        print_status("Launching terminal monitor in new window...", "info")
+
+        if sys.platform == "win32":
+            subprocess.Popen(
+                ["cmd", "/k", "python", "-m", "utils.terminal_dashboard"],
+                cwd=Path.cwd(),
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            print_status("Terminal monitor launched successfully", "success")
+            print_status("Monitor window title: 'Exchange Dashboard Monitor'", "info")
+            return True
+        else:
+            for terminal in ["gnome-terminal", "konsole", "xterm"]:
+                if shutil.which(terminal):
+                    subprocess.Popen(
+                        [terminal, "--", "python3", "-m", "utils.terminal_dashboard"],
+                        cwd=Path.cwd()
+                    )
+                    print_status(f"Terminal monitor launched in {terminal}", "success")
+                    return True
+            print_status("No suitable terminal emulator found", "warning")
+            return False
+    except Exception as e:
+        print_status(f"Failed to launch terminal monitor: {e}", "warning")
+        print_status("You can manually run: python -m utils.terminal_dashboard", "info")
+        return False
+
 def print_summary(collector_running=True, spread_collector_running=False, zscore_running=False, dashboard_running=False):
     """Print summary of running services."""
     print("\n" + "="*60, flush=True)
@@ -676,7 +707,7 @@ def print_summary(collector_running=True, spread_collector_running=False, zscore
     print(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}", flush=True)
     sys.stdout.flush()
 
-def main():
+def main(args=None):
     """Main startup sequence."""
     # Immediate output to show script is running
     print("Starting Exchange Dashboard System...", flush=True)
@@ -749,36 +780,92 @@ def main():
     if dashboard_started:
         open_dashboard()
 
-    # Step 13: Show summary
+    print()  # Empty line for spacing
+
+    # Step 13: Launch terminal monitor in separate window
+    monitor_launched = False
+    if args is None or not args.no_monitor:
+        monitor_launched = launch_terminal_dashboard()
+
+    # Step 14: Show summary
     print_summary(
         collector_running=collector_started,
         spread_collector_running=spread_collector_started,
         zscore_running=zscore_started,
         dashboard_running=dashboard_started
     )
-    
-    # Keep running until Ctrl+C
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print(f"\n\n{Colors.YELLOW}Shutting down...{Colors.RESET}")
-        print("Services will continue running in the background.")
-        print("To stop them completely, close the console windows or use Docker Desktop.")
+
+    return {
+        'collector_running': collector_started,
+        'spread_collector_running': spread_collector_started,
+        'zscore_running': zscore_started,
+        'dashboard_running': dashboard_started
+    }
 
 if __name__ == "__main__":
     try:
         # Force immediate output
         print("Initializing startup script...", flush=True)
         sys.stdout.flush()
-        
+
+        parser = argparse.ArgumentParser(description="Start Exchange Dashboard System")
+        parser.add_argument('--no-dashboard', action='store_true',
+                          help='Disable live monitoring dashboard (use with --no-monitor to run without any dashboard)')
+        parser.add_argument('--no-monitor', action='store_true',
+                          help='Disable auto-launch of monitor in separate window (dashboard will run in main terminal instead)')
+        parser.add_argument('--dashboard-only', action='store_true',
+                          help='Launch dashboard without starting services')
+        args = parser.parse_args()
+
+        if args.dashboard_only:
+            print_status("Launching dashboard in monitoring mode...", "info")
+            try:
+                from utils.terminal_dashboard import TerminalDashboard
+                dashboard = TerminalDashboard()
+                dashboard.run()
+            except ImportError:
+                print_status("Dashboard module not available. Install: pip install rich>=13.0.0", "error")
+                sys.exit(1)
+            except KeyboardInterrupt:
+                print(f"\n{Colors.YELLOW}Dashboard stopped{Colors.RESET}")
+            sys.exit(0)
+
         # Check if running from a terminal that will close immediately
         if sys.platform == "win32" and not sys.stdin.isatty():
             # Add a pause for Windows when not running in interactive terminal
             import atexit
             atexit.register(lambda: input("\nPress Enter to exit..."))
-        
-        main()
+
+        service_status = main(args)
+
+        if args.no_monitor and not args.no_dashboard:
+            try:
+                from utils.terminal_dashboard import TerminalDashboard
+                print(f"\n{Colors.GREEN}Starting live monitoring dashboard...{Colors.RESET}")
+                print(f"{Colors.YELLOW}Note: The dashboard will update every 30 seconds with fresh metrics{Colors.RESET}\n")
+                time.sleep(2)
+                dashboard = TerminalDashboard()
+                dashboard.run()
+            except ImportError:
+                print_status("\nLive dashboard not available. Install: pip install rich>=13.0.0", "warning")
+                print_status("Falling back to standard mode...", "info")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print(f"\n\n{Colors.YELLOW}Shutting down...{Colors.RESET}")
+            except KeyboardInterrupt:
+                print(f"\n\n{Colors.YELLOW}Shutting down...{Colors.RESET}")
+        else:
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print(f"\n\n{Colors.YELLOW}Shutting down...{Colors.RESET}")
+
+        print("Services will continue running in the background.")
+        print("To stop them completely, close the console windows or use Docker Desktop.")
+
     except Exception as e:
         print_status(f"\nUnexpected error: {e}", "error")
         print("\nFor help, check the README.md or run components manually.")

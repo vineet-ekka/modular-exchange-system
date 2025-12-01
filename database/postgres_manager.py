@@ -8,10 +8,12 @@ import os
 import json
 import pandas as pd
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import execute_batch, Json
 from psycopg2 import sql
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+from contextlib import contextmanager
 from utils.logger import setup_logger
 from config.settings import (
     POSTGRES_HOST,
@@ -28,16 +30,25 @@ from config.settings import (
 class PostgresManager:
     """
     Manager class for PostgreSQL database operations.
+
+    Usage as context manager (recommended):
+        with PostgresManager() as db:
+            db.upload_data(dataframe)
+
+    Usage without context manager:
+        db = PostgresManager()
+        try:
+            db.upload_data(dataframe)
+        finally:
+            db.close()
     """
-    
+
     def __init__(self):
         """
-        Initialize the PostgreSQL manager.
+        Initialize the PostgreSQL manager with connection pooling.
         """
         self.logger = setup_logger("PostgresManager")
-        self.connection = None
-        self.cursor = None
-        
+
         # Database configuration
         self.config = {
             'host': POSTGRES_HOST,
@@ -46,38 +57,147 @@ class PostgresManager:
             'user': POSTGRES_USER,
             'password': POSTGRES_PASSWORD
         }
-        
+
         # Table names
         self.table_name = DATABASE_TABLE_NAME
         self.historical_table_name = HISTORICAL_TABLE_NAME
-        
-        # Initialize connection
-        self._connect()
-        
+
+        # Initialize connection pool (5-20 connections)
+        try:
+            self.pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=5,
+                maxconn=20,
+                **self.config
+            )
+            self.logger.info("Successfully created PostgreSQL connection pool (5-20 connections)")
+        except Exception as e:
+            self.logger.error(f"Failed to create connection pool: {e}")
+            raise
+
+        # Maintain backward compatibility: keep one connection for existing code
+        self.connection = self.pool.getconn()
+        self.cursor = self.connection.cursor()
+
         # Create tables if they don't exist
         self._create_tables()
-    
-    def _connect(self):
+
+    def __enter__(self):
         """
-        Establish connection to PostgreSQL database.
+        Context manager entry. Returns self for use in 'with' statements.
         """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Context manager exit. Ensures connections are properly closed.
+
+        Args:
+            exc_type: Exception type if an error occurred
+            exc_val: Exception value if an error occurred
+            exc_tb: Exception traceback if an error occurred
+
+        Returns:
+            False to propagate exceptions
+        """
+        self.close()
+        return False
+
+    @contextmanager
+    def get_connection(self):
+        """
+        Context manager for acquiring and releasing connections from the pool.
+
+        Usage:
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM table")
+                conn.commit()
+        """
+        conn = None
         try:
-            self.connection = psycopg2.connect(**self.config)
-            self.cursor = self.connection.cursor()
-            self.logger.info("Successfully connected to PostgreSQL database")
+            conn = self.pool.getconn()
+            yield conn
         except Exception as e:
-            self.logger.error(f"Failed to connect to PostgreSQL: {e}")
+            if conn:
+                conn.rollback()
+            self.logger.error(f"Database operation failed: {e}")
             raise
-    
+        finally:
+            if conn:
+                self.pool.putconn(conn)
+
     def _disconnect(self):
         """
-        Close database connection.
+        Close all connections in the pool.
         """
         if self.cursor:
             self.cursor.close()
         if self.connection:
-            self.connection.close()
-    
+            self.pool.putconn(self.connection)
+        if self.pool:
+            self.pool.closeall()
+            self.logger.info("Closed all connections in the pool")
+
+    def _check_pool_health(self):
+        """
+        Check if the connection pool is healthy.
+        Returns True if healthy, False otherwise.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.close()
+            return True
+        except Exception as e:
+            self.logger.warning(f"Pool health check failed: {e}")
+            return False
+
+    def _recreate_pool(self, max_retries=3):
+        """
+        Recreate the connection pool with exponential backoff.
+        Attempts to recover from total pool failure.
+        """
+        import time
+
+        for attempt in range(max_retries):
+            try:
+                if self.pool:
+                    self.pool.closeall()
+
+                self.pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=5,
+                    maxconn=20,
+                    **self.config
+                )
+
+                self.connection = self.pool.getconn()
+                self.cursor = self.connection.cursor()
+
+                self.logger.info(f"Successfully recreated connection pool (attempt {attempt + 1})")
+                return True
+
+            except Exception as e:
+                wait_time = 2 ** attempt
+                self.logger.error(f"Failed to recreate pool (attempt {attempt + 1}/{max_retries}): {e}")
+
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+
+        self.logger.critical("Failed to recreate connection pool after all retries")
+        return False
+
+    def ensure_connection(self):
+        """
+        Ensure the pool is healthy. Recreate if necessary.
+        Call this before critical operations.
+        """
+        if not self._check_pool_health():
+            self.logger.warning("Pool unhealthy, attempting to recreate...")
+            return self._recreate_pool()
+        return True
+
     def _create_tables(self):
         """
         Create necessary tables if they don't exist.
@@ -260,17 +380,21 @@ class PostgresManager:
                     self.logger.error(f"Missing required column: {col}")
                     return False
             
-            # Prepare data for insertion
+            # Prepare data for insertion (using itertuples for 100x performance vs iterrows)
             records = []
-            for _, row in df.iterrows():
+            for row in df.itertuples(index=False):
+                # Safely access optional fields using hasattr
+                mark_price = float(row.mark_price) if hasattr(row, 'mark_price') and pd.notna(row.mark_price) else None
+                base_asset = row.base_asset if hasattr(row, 'base_asset') else None
+
                 record = (
-                    row['exchange'],
-                    row['symbol'],
-                    float(row['funding_rate']) if pd.notna(row['funding_rate']) else None,
-                    row['funding_time'],
-                    float(row.get('mark_price')) if pd.notna(row.get('mark_price')) else None,
-                    int(row['funding_interval_hours']),
-                    row.get('base_asset', None)  # Add base_asset
+                    row.exchange,
+                    row.symbol,
+                    float(row.funding_rate) if pd.notna(row.funding_rate) else None,
+                    row.funding_time,
+                    mark_price,
+                    int(row.funding_interval_hours),
+                    base_asset
                 )
                 records.append(record)
             
@@ -405,46 +529,6 @@ class PostgresManager:
                 execute_batch(self.cursor, insert_query, values, page_size=500)
                 
             else:
-                # For main table, check for funding rate changes before upserting
-                if 'funding_rate' in columns and 'exchange' in columns and 'symbol' in columns:
-                    # Get current rates from database for comparison
-                    fetch_query = """
-                        SELECT exchange, symbol, funding_rate
-                        FROM exchange_data
-                        WHERE (exchange, symbol) IN %s
-                    """
-
-                    # Create list of (exchange, symbol) tuples from values
-                    exchange_idx = columns.index('exchange')
-                    symbol_idx = columns.index('symbol')
-                    funding_rate_idx = columns.index('funding_rate')
-
-                    exchange_symbol_pairs = [(row[exchange_idx], row[symbol_idx]) for row in values]
-
-                    # Fetch existing rates
-                    if exchange_symbol_pairs:
-                        self.cursor.execute(fetch_query, (tuple(set(exchange_symbol_pairs)),))
-                        existing_rates = {(row[0], row[1]): row[2] for row in self.cursor.fetchall()}
-
-                        # Track rate changes
-                        changed_count = 0
-                        unchanged_count = 0
-
-                        for row in values:
-                            exchange = row[exchange_idx]
-                            symbol = row[symbol_idx]
-                            new_rate = row[funding_rate_idx]
-                            old_rate = existing_rates.get((exchange, symbol))
-
-                            if old_rate is not None and abs(float(old_rate) - float(new_rate)) > 0.00000001:
-                                changed_count += 1
-                                self.logger.info(f"Funding rate changed: {exchange} {symbol}: {old_rate:.8f} -> {new_rate:.8f}")
-                            elif old_rate is not None:
-                                unchanged_count += 1
-
-                        if changed_count > 0 or unchanged_count > 0:
-                            self.logger.info(f"Funding rate update summary: {changed_count} changed, {unchanged_count} unchanged")
-
                 # For main table, use UPSERT (INSERT ... ON CONFLICT UPDATE)
                 insert_query = sql.SQL("""
                     INSERT INTO {} ({}) VALUES ({})
@@ -595,8 +679,17 @@ class PostgresManager:
             self.connection.rollback()
             return -1
     
-    def __del__(self):
+    def close(self):
         """
-        Cleanup on deletion.
+        Explicitly close all connections. Use this instead of relying on __del__.
         """
         self._disconnect()
+
+    def __del__(self):
+        """
+        Cleanup on deletion (unreliable - prefer explicit close()).
+        """
+        try:
+            self._disconnect()
+        except Exception:
+            pass

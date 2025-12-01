@@ -11,6 +11,7 @@ import time
 import argparse
 import json
 import threading
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,6 +28,12 @@ from exchanges.drift_exchange import DriftExchange
 from exchanges.aster_exchange import AsterExchange
 from exchanges.lighter_exchange import LighterExchange
 from exchanges.bybit_exchange import ByBitExchange
+# from exchanges.paradex_exchange import ParadexExchange
+from exchanges.pacifica_exchange import PacificaExchange
+from exchanges.hibachi_exchange import HibachiExchange
+from exchanges.mexc_exchange import MexcExchange
+from exchanges.deribit_exchange import DeribitExchange
+from exchanges.dydx_exchange import DydxExchange
 from database.postgres_manager import PostgresManager
 from utils.logger import setup_logger
 from config.settings import (
@@ -38,6 +45,13 @@ from config.settings import (
 
 logger = setup_logger("UnifiedBackfill")
 
+# Configuration constants
+STALE_LOCK_TIMEOUT_SECONDS = 600  # 10 minutes
+RETRY_MAX_ATTEMPTS = 3
+RETRY_BASE_DELAY_SECONDS = 1  # Exponential backoff base
+COMPLETENESS_THRESHOLD_PERCENT = 95.0
+PROGRESS_LOG_INTERVAL_ASSETS = 50  # Log progress every N assets
+
 # Exchange mapping
 EXCHANGE_CLASSES = {
     'binance': BinanceExchange,
@@ -48,6 +62,11 @@ EXCHANGE_CLASSES = {
     'aster': AsterExchange,
     'lighter': LighterExchange,
     'bybit': ByBitExchange,
+    'pacifica': PacificaExchange,
+    'hibachi': HibachiExchange,
+    'mexc': MexcExchange,
+    'deribit': DeribitExchange,
+    'dydx': DydxExchange,
     # Add more exchanges here as they get historical support
 }
 
@@ -118,6 +137,56 @@ class UnifiedBackfill:
         logger.info(f"  End: {self.unified_end_time.isoformat()}")
         logger.info(f"  Start aligned to midnight: {self.align_to_midnight}")
         
+    def _write_status_atomic(self, file_path: Path, data: dict):
+        """Atomically write JSON status file to prevent corruption on crash."""
+        temp_path = file_path.with_suffix('.tmp')
+        try:
+            # Write to temp file
+            with open(temp_path, 'w') as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())  # Ensure data is written to disk
+
+            # Atomic rename (on POSIX, mostly atomic on Windows)
+            temp_path.replace(file_path)
+        except Exception as e:
+            logger.error(f"Failed to write status file {file_path}: {e}")
+            # Clean up temp file if it exists
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
+
+    def _acquire_lock(self, lock_path: Path) -> bool:
+        """Atomically acquire a lock file. Returns True if successful, False if lock already exists."""
+        try:
+            # Use O_CREAT | O_EXCL for atomic create-if-not-exists
+            # This will raise FileExistsError if the lock already exists
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            os.write(fd, f"pid:{os.getpid()}\ntime:{time.time()}".encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            # Lock already exists - check if it's stale
+            if lock_path.exists():
+                lock_age = time.time() - lock_path.stat().st_mtime
+                if lock_age >= STALE_LOCK_TIMEOUT_SECONDS:
+                    logger.warning(f"Stale lock detected ({lock_age/60:.1f} minutes old). Removing...")
+                    try:
+                        lock_path.unlink()
+                        # Try acquiring again after removing stale lock
+                        return self._acquire_lock(lock_path)
+                    except Exception as e:
+                        logger.error(f"Failed to remove stale lock: {e}")
+                        return False
+                else:
+                    return False
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error acquiring lock {lock_path}: {e}")
+            return False
+
     def initialize(self) -> bool:
         """Initialize database connection and check prerequisites."""
         try:
@@ -129,19 +198,24 @@ class UnifiedBackfill:
                 if self.dashboard_lock_file.exists():
                     logger.info("Loop mode: Removing existing dashboard lock")
                     self.dashboard_lock_file.unlink()
-            else:
-                # Check for existing lock (only in non-loop mode)
-                if self.lock_file.exists() or self.dashboard_lock_file.exists():
-                    lock_age = time.time() - self.lock_file.stat().st_mtime if self.lock_file.exists() else 0
-                    dash_lock_age = time.time() - self.dashboard_lock_file.stat().st_mtime if self.dashboard_lock_file.exists() else 0
-                    if lock_age < 600 or dash_lock_age < 600:  # Less than 10 minutes old
-                        logger.warning("Another backfill is already running!")
-                        logger.warning("If this is incorrect, delete .unified_backfill.lock and .backfill.lock")
-                        return False
 
-            # Create lock files
-            self.lock_file.touch()
-            self.dashboard_lock_file.touch()
+            # Atomically acquire locks (skipped in loop mode since we force-cleaned above)
+            if not self.is_loop_mode:
+                if not self._acquire_lock(self.lock_file):
+                    logger.warning("Another backfill is already running!")
+                    logger.warning("If this is incorrect, delete .unified_backfill.lock and .backfill.lock")
+                    return False
+
+                if not self._acquire_lock(self.dashboard_lock_file):
+                    logger.warning("Another backfill is already running (dashboard lock)!")
+                    # Clean up the first lock we just created
+                    if self.lock_file.exists():
+                        self.lock_file.unlink()
+                    return False
+            else:
+                # In loop mode, create locks normally after force cleanup
+                self.lock_file.touch()
+                self.dashboard_lock_file.touch()
             
             # Initialize database if not dry run
             if not self.dry_run:
@@ -168,10 +242,10 @@ class UnifiedBackfill:
     
     def update_progress(self, exchange: str, symbols_processed: int, total_symbols: int,
                        records_fetched: int, status: str = "processing", completeness_data: dict = None,
-                       price_assets: int = 0):
-        """Update progress for an exchange with optional completeness data."""
+                       price_assets: int = 0, start_time: float = None, elapsed_time: float = None):
+        """Update progress for an exchange with optional completeness data and timing."""
         with self.lock:
-            self.progress_data[exchange] = {
+            progress_entry = {
                 'symbols_processed': symbols_processed,
                 'total_symbols': total_symbols,
                 'records_fetched': records_fetched,
@@ -179,6 +253,19 @@ class UnifiedBackfill:
                 'progress': int((symbols_processed / total_symbols * 100)) if total_symbols > 0 else 0,
                 'price_assets': price_assets
             }
+
+            # Add timing data if provided
+            if start_time is not None:
+                progress_entry['start_time'] = start_time
+            if elapsed_time is not None:
+                progress_entry['elapsed_time'] = elapsed_time
+                # Calculate estimated remaining time for in-progress exchanges
+                if status == "processing" and symbols_processed > 0 and total_symbols > 0:
+                    avg_time_per_symbol = elapsed_time / symbols_processed
+                    remaining_symbols = total_symbols - symbols_processed
+                    progress_entry['estimated_remaining'] = avg_time_per_symbol * remaining_symbols
+
+            self.progress_data[exchange] = progress_entry
             
             # Store completeness data if provided
             if completeness_data:
@@ -211,7 +298,7 @@ class UnifiedBackfill:
                         'percentage': round(complete_count / total * 100, 2) if total > 0 else 0
                     }
             
-            # Write status files
+            # Write status files atomically
             status_data = {
                 'running': True,
                 'overall_progress': overall_progress,
@@ -220,23 +307,61 @@ class UnifiedBackfill:
                 'completeness': completeness_summary,
                 'message': f"Processing {active_exchanges} exchange(s)..."
             }
-            self.status_file.write_text(json.dumps(status_data, indent=2))
-            
-            # Also write dashboard-compatible status file
+            self._write_status_atomic(self.status_file, status_data)
+
+            # Also write dashboard-compatible status file atomically
             dashboard_status = {
                 'running': True,
                 'progress': overall_progress,
                 'message': f"Unified backfill: {overall_progress}% complete ({total_records:,} records)",
                 'completed': False
             }
-            self.dashboard_status_file.write_text(json.dumps(dashboard_status, indent=2))
+            self._write_status_atomic(self.dashboard_status_file, dashboard_status)
     
-    def backfill_exchange(self, exchange_name: str) -> Tuple[str, int, bool]:
+    def backfill_exchange(self, exchange_name: str, max_retries: int = RETRY_MAX_ATTEMPTS) -> Tuple[str, int, bool, int]:
         """
-        Backfill historical data for a single exchange.
-        
+        Backfill historical data for a single exchange with retry logic.
+
+        Args:
+            exchange_name: Name of the exchange to backfill
+            max_retries: Maximum number of retry attempts for transient failures
+
         Returns:
-            Tuple of (exchange_name, records_count, success)
+            Tuple of (exchange_name, records_count, success, price_assets_count)
+        """
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return self._backfill_exchange_impl(exchange_name)
+            except Exception as e:
+                last_exception = e
+                # Check if this is a transient error worth retrying
+                error_msg = str(e).lower()
+                is_transient = any(keyword in error_msg for keyword in [
+                    'timeout', 'connection', 'network', 'rate limit',
+                    'temporarily', 'unavailable', 'try again'
+                ])
+
+                if is_transient and attempt < max_retries - 1:
+                    wait_time = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(f"{exchange_name}: Transient error on attempt {attempt + 1}/{max_retries}: {e}")
+                    logger.info(f"{exchange_name}: Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    # Non-transient error or final attempt - give up
+                    logger.error(f"{exchange_name}: Failed after {attempt + 1} attempts: {e}")
+                    raise
+
+        # Should not reach here, but handle it anyway
+        raise last_exception if last_exception else Exception("Unknown error in retry logic")
+
+    def _backfill_exchange_impl(self, exchange_name: str) -> Tuple[str, int, bool, int]:
+        """
+        Internal implementation of exchange backfill (called by retry wrapper).
+
+        Returns:
+            Tuple of (exchange_name, records_count, success, price_assets_count)
         """
         try:
             logger.info(f"="*60)
@@ -252,15 +377,18 @@ class UnifiedBackfill:
             # Initialize exchange
             exchange = exchange_class()
             
+            # Fetch historical data with unified dates if sync is enabled
+            start_time = time.time()
+
             # Create progress callback for this exchange
             def progress_callback(symbols_processed, total_symbols, progress, message):
                 # Track records fetched (estimate based on progress)
                 records_estimate = int(symbols_processed * 24 * self.days / 8)  # Rough estimate
-                self.update_progress(exchange_name, symbols_processed, total_symbols, 
-                                   records_estimate, "processing")
-            
-            # Fetch historical data with unified dates if sync is enabled
-            start_time = time.time()
+                current_elapsed = time.time() - start_time
+                self.update_progress(exchange_name, symbols_processed, total_symbols,
+                                   records_estimate, "processing",
+                                   start_time=start_time,
+                                   elapsed_time=current_elapsed)
             
             # Prepare kwargs for the fetch method
             fetch_kwargs = {
@@ -313,11 +441,19 @@ class UnifiedBackfill:
                     if completeness_pct < 95:
                         logger.warning(f"{exchange_name}:{symbol} - Low completeness: {completeness_pct:.1f}% ({actual_points}/{int(expected_points)} points)")
             
-            # Log completeness summary
+            # Log completeness summary and validate against threshold
+            completeness_acceptable = True
             if completeness_data:
                 complete_symbols = sum(1 for s in completeness_data.values() if s['completeness'] >= 95)
-                logger.info(f"{exchange_name.upper()}: {complete_symbols}/{len(completeness_data)} symbols have ≥95% completeness")
-            
+                overall_completeness_pct = (complete_symbols / len(completeness_data) * 100) if len(completeness_data) > 0 else 0
+                logger.info(f"{exchange_name.upper()}: {complete_symbols}/{len(completeness_data)} symbols have ≥95% completeness ({overall_completeness_pct:.1f}%)")
+
+                # Check if overall completeness meets threshold
+                if overall_completeness_pct < COMPLETENESS_THRESHOLD_PERCENT:
+                    logger.warning(f"{exchange_name.upper()}: Overall completeness {overall_completeness_pct:.1f}% is below threshold {COMPLETENESS_THRESHOLD_PERCENT}%")
+                    logger.warning(f"{exchange_name.upper()}: This may indicate missing data or API issues - consider re-running backfill")
+                    completeness_acceptable = False
+
             logger.info(f"="*60)
             
             # Upload to database
@@ -339,7 +475,9 @@ class UnifiedBackfill:
                                        historical_df['symbol'].nunique(),
                                        len(historical_df), "completed",
                                        completeness_data=completeness_data,
-                                       price_assets=price_assets_collected)
+                                       price_assets=price_assets_collected,
+                                       start_time=start_time,
+                                       elapsed_time=elapsed_time)
                     return (exchange_name, len(historical_df), True, price_assets_collected)
                 else:
                     logger.error(f"Failed to upload {exchange_name} data")
@@ -373,41 +511,46 @@ class UnifiedBackfill:
             True if all successful, False otherwise
         """
         logger.info(f"Running parallel backfill for {exchanges} with {max_workers} workers")
-        
+
         all_success = True
         total_records = 0
-        results = []
-        
+        successful_exchanges = 0
+        failed_exchanges = 0
+
+        logger.info("="*60)
+        logger.info("BACKFILL SUMMARY (processing as completed)")
+        logger.info("="*60)
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             futures = {
-                executor.submit(self.backfill_exchange, exchange): exchange 
+                executor.submit(self.backfill_exchange, exchange): exchange
                 for exchange in exchanges
             }
-            
-            # Process results as they complete
+
+            # Process and log results immediately as they complete (no accumulation)
             for future in as_completed(futures):
                 exchange_name, records, success, price_assets = future.result()
-                results.append({
-                    'exchange': exchange_name,
-                    'records': records,
-                    'success': success,
-                    'price_assets': price_assets
-                })
 
+                # Log immediately (no accumulation in memory)
+                status = "✓" if success else "✗"
+                price_info = f", {price_assets} assets with prices" if price_assets > 0 else ""
+                logger.info(f"{status} {exchange_name}: {records:,} funding records{price_info}")
+
+                # Update running totals only
                 if not success:
                     all_success = False
+                    failed_exchanges += 1
+                else:
+                    successful_exchanges += 1
                 total_records += records
 
         # Final summary
         logger.info("="*60)
-        logger.info("BACKFILL SUMMARY")
-        logger.info("="*60)
-        for result in results:
-            status = "✓" if result['success'] else "✗"
-            price_info = f", {result['price_assets']} assets with prices" if result['price_assets'] > 0 else ""
-            logger.info(f"{status} {result['exchange']}: {result['records']} funding records{price_info}")
-        logger.info(f"Total records: {total_records}")
+        logger.info(f"Total records: {total_records:,}")
+        logger.info(f"Successful: {successful_exchanges}/{len(exchanges)} exchanges")
+        if failed_exchanges > 0:
+            logger.info(f"Failed: {failed_exchanges} exchanges")
         logger.info("="*60)
         
         return all_success
@@ -415,43 +558,48 @@ class UnifiedBackfill:
     def run_sequential(self, exchanges: List[str]) -> bool:
         """
         Run backfill for multiple exchanges sequentially.
-        
+
         Args:
             exchanges: List of exchange names
-            
+
         Returns:
             True if all successful, False otherwise
         """
         logger.info(f"Running sequential backfill for {exchanges}")
-        
+
         all_success = True
         total_records = 0
-        results = []
-        
+        successful_exchanges = 0
+        failed_exchanges = 0
+
+        logger.info("="*60)
+        logger.info("BACKFILL SUMMARY (processing sequentially)")
+        logger.info("="*60)
+
         for exchange in exchanges:
             exchange_name, records, success, price_assets = self.backfill_exchange(exchange)
-            results.append({
-                'exchange': exchange_name,
-                'records': records,
-                'success': success,
-                'price_assets': price_assets
-            })
 
+            # Log immediately (no accumulation in memory)
+            status = "✓" if success else "✗"
+            price_info = f", {price_assets} assets with prices" if price_assets > 0 else ""
+            logger.info(f"{status} {exchange_name}: {records:,} funding records{price_info}")
+
+            # Update running totals only
             if not success:
                 all_success = False
+                failed_exchanges += 1
+            else:
+                successful_exchanges += 1
             total_records += records
 
         # Final summary
         logger.info("="*60)
-        logger.info("BACKFILL SUMMARY")
+        logger.info(f"Total records: {total_records:,}")
+        logger.info(f"Successful: {successful_exchanges}/{len(exchanges)} exchanges")
+        if failed_exchanges > 0:
+            logger.info(f"Failed: {failed_exchanges} exchanges")
         logger.info("="*60)
-        for result in results:
-            status = "✓" if result['success'] else "✗"
-            price_info = f", {result['price_assets']} assets with prices" if result['price_assets'] > 0 else ""
-            logger.info(f"{status} {result['exchange']}: {result['records']} funding records{price_info}")
-        logger.info(f"Total records: {total_records}")
-        logger.info("="*60)
-        
+
         return all_success
 
 
@@ -567,8 +715,12 @@ def main():
 
             total_time = time.time() - start_time
 
+            # Calculate total records from progress data
+            total_records = sum(ex_data.get('records_fetched', 0) for ex_data in backfill.progress_data.values())
+
             # Final status
             logger.info(f"Total backfill time: {total_time:.2f} seconds")
+            logger.info(f"Total records collected: {total_records:,}")
 
             if success:
                 logger.info("="*60)
@@ -578,7 +730,7 @@ def main():
                     logger.info("UNIFIED BACKFILL COMPLETED SUCCESSFULLY")
                 logger.info("="*60)
 
-                # Write final status
+                # Write final status atomically
                 final_status = {
                     'running': False,
                     'overall_progress': 100,
@@ -588,7 +740,19 @@ def main():
                     'total_time': total_time,
                     'run_number': run_number
                 }
-                backfill.status_file.write_text(json.dumps(final_status, indent=2))
+                backfill._write_status_atomic(backfill.status_file, final_status)
+
+                # Also update dashboard-compatible status file atomically
+                dashboard_final_status = {
+                    'running': False,
+                    'progress': 100,
+                    'message': f"Backfill completed: {total_records:,} records in {int(total_time)}s",
+                    'completed': True,
+                    'total_records': total_records,
+                    'total_time': total_time,
+                    'timestamp': datetime.now().isoformat()
+                }
+                backfill._write_status_atomic(backfill.dashboard_status_file, dashboard_final_status)
             else:
                 logger.error("="*60)
                 if run_number:

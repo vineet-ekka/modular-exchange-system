@@ -1,5 +1,5 @@
 import React from 'react';
-import ModernCard from '../Modern/ModernCard';
+import { Card } from '../ui/card';
 
 interface APRExtremeCardProps {
   highestAPR: number;
@@ -22,7 +22,7 @@ const APRExtremeCard: React.FC<APRExtremeCardProps> = ({
 }) => {
   if (loading) {
     return (
-      <ModernCard variant="elevated" padding="lg">
+      <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
         <div className="space-y-3">
           <div className="skeleton h-4 w-32" />
           <div className="grid grid-cols-2 gap-4 mt-4">
@@ -30,12 +30,12 @@ const APRExtremeCard: React.FC<APRExtremeCardProps> = ({
             <div className="skeleton h-16" />
           </div>
         </div>
-      </ModernCard>
+      </Card>
     );
   }
 
   return (
-    <ModernCard variant="elevated" padding="lg">
+    <Card className="shadow-md hover:shadow-lg transition-shadow duration-200 p-6">
       <p className="text-sm font-medium text-text-secondary mb-4">
         APR Extremes
       </p>
@@ -75,7 +75,7 @@ const APRExtremeCard: React.FC<APRExtremeCardProps> = ({
           )}
         </div>
       </div>
-    </ModernCard>
+    </Card>
   );
 };
 
