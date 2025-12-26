@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class PacificaExchange(BaseExchange):
@@ -202,8 +203,8 @@ class PacificaExchange(BaseExchange):
             if not cursor:
                 break
 
-            # Small delay to respect rate limits
-            time.sleep(0.1)
+            # Respect rate limits via token bucket
+            rate_limiter.acquire('pacifica')
 
         if iteration >= max_iterations:
             self.logger.warning(f"Reached maximum iterations ({max_iterations}) for {symbol}")
@@ -305,8 +306,8 @@ class PacificaExchange(BaseExchange):
                 if symbols_processed % 10 == 0:
                     print(f"PACIFICA: Progress - {symbols_processed}/{total_symbols} contracts ({progress:.1f}%)")
                 
-                # Small delay to respect rate limits
-                time.sleep(0.2)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('pacifica')
         
         # Combine all data
         if all_historical_data:

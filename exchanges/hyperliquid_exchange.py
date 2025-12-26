@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class HyperliquidExchange(BaseExchange):
@@ -360,8 +361,8 @@ class HyperliquidExchange(BaseExchange):
                     progress = ((i + 1) / len(assets)) * 100
                     progress_callback(i + 1, len(assets), progress, f"Processing {asset}")
                 
-                # Delay to respect rate limits (increased to avoid 429 errors)
-                time.sleep(1.0)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('hyperliquid')
                 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for {asset}: {e}")

@@ -11,23 +11,23 @@ import logging
 import time
 import numpy as np
 from utils.logger import setup_logger
+from config.settings import EXCHANGE_NAME_MAP
 
 logger = setup_logger("ArbitrageScanner")
 
 
 class SpreadStatsCache:
-    """Simple time-based cache for spread statistics with 15s TTL."""
+    """Single-value time-based cache for batch spread statistics."""
     def __init__(self):
         self._data = None
         self._timestamp = 0
-        self._ttl = 15
 
-    def get(self, key, ttl_seconds=15):
+    def get(self, ttl_seconds=15):
         if self._data and (time.time() - self._timestamp) < ttl_seconds:
             return self._data
         return None
 
-    def set(self, key, value, ttl_seconds=15):
+    def set(self, value, ttl_seconds=15):
         self._data = value
         self._timestamp = time.time()
 
@@ -310,9 +310,8 @@ def batch_calculate_spread_statistics(cur, logger, cache=None) -> Dict:
     """
     import time
 
-    cache_key = 'spread_statistics_batch'
     if cache:
-        cached = cache.get(cache_key, ttl_seconds=15)
+        cached = cache.get(ttl_seconds=15)
         if cached:
             logger.info("Using cached spread statistics (15s TTL)")
             return cached
@@ -330,7 +329,7 @@ def batch_calculate_spread_statistics(cur, logger, cache=None) -> Dict:
         FROM funding_rates_historical h1
         INNER JOIN funding_rates_historical h2
             ON h1.base_asset = h2.base_asset
-            AND h1.funding_time = h2.funding_time
+            AND DATE_TRUNC('minute', h1.funding_time) = DATE_TRUNC('minute', h2.funding_time)
             AND h1.exchange < h2.exchange  -- Avoid duplicates (alphabetical ordering)
         WHERE h1.funding_time >= NOW() - INTERVAL '30 days'
             AND h1.funding_rate IS NOT NULL
@@ -357,7 +356,7 @@ def batch_calculate_spread_statistics(cur, logger, cache=None) -> Dict:
             ON cp.ex1 = h1.exchange AND cp.sym1 = h1.symbol
         INNER JOIN funding_rates_historical h2
             ON cp.ex2 = h2.exchange AND cp.sym2 = h2.symbol
-            AND h1.funding_time = h2.funding_time
+            AND DATE_TRUNC('minute', h1.funding_time) = DATE_TRUNC('minute', h2.funding_time)
         WHERE h1.funding_time >= NOW() - INTERVAL '30 days'
             AND h1.funding_rate IS NOT NULL
             AND h2.funding_rate IS NOT NULL
@@ -394,7 +393,7 @@ def batch_calculate_spread_statistics(cur, logger, cache=None) -> Dict:
         logger.info(f"Batch spread statistics calculated: {row_count} pairs in {elapsed:.2f}s")
 
         if cache and spread_cache:
-            cache.set(cache_key, spread_cache, ttl_seconds=15)
+            cache.set(spread_cache, ttl_seconds=15)
             logger.info("Cached spread statistics for 15s")
 
         return spread_cache
@@ -417,7 +416,9 @@ def calculate_contract_level_arbitrage(
     min_apr: Optional[float] = None,
     max_apr: Optional[float] = None,
     min_oi_either: Optional[float] = None,
-    min_oi_combined: Optional[float] = None
+    min_oi_combined: Optional[float] = None,
+    sort_by: str = "apr_spread",
+    sort_dir: str = "desc"
 ) -> Dict[str, Any]:
     """
     Calculate arbitrage opportunities at the contract level with correct Z-scores.
@@ -617,12 +618,10 @@ def calculate_contract_level_arbitrage(
                                     spread_std_dev = spread_stats['std_dev']
                                     data_points = spread_stats['data_points']
 
-                                    # Calculate Z-score if we have valid standard deviation
-                                    # Handle edge case where std_dev might be None or zero
-                                    if spread_std_dev and spread_std_dev > 0.001:
+                                    # Calculate Z-score if we have valid standard deviation and mean
+                                    # Handle edge case where std_dev or mean might be None or zero
+                                    if spread_std_dev is not None and spread_std_dev > 0 and spread_mean is not None:
                                         spread_zscore = (apr_spread - spread_mean) / spread_std_dev
-                                        # Clamp extreme values to prevent outliers
-                                        spread_zscore = max(-10, min(10, spread_zscore))
                                     else:
                                         # If no variance, Z-score is undefined
                                         spread_zscore = None
@@ -723,19 +722,15 @@ def calculate_contract_level_arbitrage(
                                 'monthly_spread': monthly_spread,
                                 'quarterly_spread': quarterly_spread,
                                 'yearly_spread': yearly_spread,
-                                # Statistical significance - use spread Z-score if available
-                                'is_significant': (
-                                    (spread_zscore is not None and abs(spread_zscore) > 2) or
-                                    (long_contract['z_score'] is not None and abs(long_contract['z_score']) > 2) or
-                                    (short_contract['z_score'] is not None and abs(short_contract['z_score']) > 2)
-                                )
+                                # Statistical significance - based on spread Z-score only
+                                # Individual leg Z-scores ignored to prevent false positives
+                                'is_significant': spread_zscore is not None and abs(spread_zscore) > 2
                             }
 
-                            # Calculate combined open interest if available
-                            if long_contract['open_interest'] and short_contract['open_interest']:
-                                opportunity['combined_open_interest'] = (
-                                    long_contract['open_interest'] + short_contract['open_interest']
-                                )
+                            # Calculate combined open interest (default to 0 if unavailable)
+                            opportunity['combined_open_interest'] = (
+                                (long_contract['open_interest'] or 0) + (short_contract['open_interest'] or 0)
+                            )
 
                             opportunities.append(opportunity)
 
@@ -752,23 +747,7 @@ def calculate_contract_level_arbitrage(
         if exchanges:
             # Normalize exchange names for case-insensitive matching
             # Frontend sends lowercase ("binance"), database stores specific casing ("Binance", "ByBit", "KuCoin", etc.)
-            EXCHANGE_NAME_MAP = {
-                'binance': 'Binance',
-                'bybit': 'ByBit',
-                'kucoin': 'KuCoin',
-                'mexc': 'MEXC',
-                'dydx': 'dYdX',
-                'backpack': 'Backpack',
-                'hyperliquid': 'Hyperliquid',
-                'drift': 'Drift',
-                'aster': 'Aster',
-                'lighter': 'Lighter',
-                'pacifica': 'Pacifica',
-                'paradex': 'Paradex',
-                'hibachi': 'Hibachi',
-                'orderly': 'Orderly',
-                'deribit': 'Deribit'
-            }
+            # EXCHANGE_NAME_MAP imported from config.settings
 
             normalized_exchanges = set()
             for ex in exchanges:
@@ -778,8 +757,7 @@ def calculate_contract_level_arbitrage(
                 elif ex.lower() in EXCHANGE_NAME_MAP:
                     normalized_exchanges.add(EXCHANGE_NAME_MAP[ex.lower()])
                 else:
-                    # Fallback: capitalize first letter
-                    normalized_exchanges.add(ex.capitalize())
+                    logger.warning(f"Unknown exchange '{ex}' ignored - not in EXCHANGE_NAME_MAP")
 
             logger.info(f"Exchange filter - Normalized exchanges: {normalized_exchanges}")
 
@@ -834,8 +812,17 @@ def calculate_contract_level_arbitrage(
             opportunities = [o for o in opportunities
                            if o.get('combined_open_interest', 0) >= min_oi_combined]
 
-        # Sort by daily spread (highest first) - more practical than APR
-        opportunities.sort(key=lambda x: x.get('daily_spread', 0) or 0, reverse=True)
+        # Dynamic sorting based on sort_by and sort_dir parameters
+        sort_key_map = {
+            'apr_spread': lambda x: x.get('apr_spread', 0) or 0,
+            'rate_spread': lambda x: x.get('rate_spread_pct', 0) or 0,
+            'spread_zscore': lambda x: abs(x.get('spread_zscore', 0) or 0),
+            'open_interest': lambda x: (x.get('long_open_interest', 0) or 0) + (x.get('short_open_interest', 0) or 0),
+            'daily_spread': lambda x: x.get('daily_spread', 0) or 0,
+        }
+        sort_key_fn = sort_key_map.get(sort_by, sort_key_map['apr_spread'])
+        reverse_sort = sort_dir.lower() == 'desc'
+        opportunities.sort(key=sort_key_fn, reverse=reverse_sort)
 
         # Calculate total count and pagination
         total_opportunities = len(opportunities)

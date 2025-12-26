@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { debounce } from 'lodash-es';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import debounce from 'lodash/debounce';
 import { Asset } from '../../types/arbitrageFilter';
-import styles from './ArbitrageFilter.module.css';
+import { Label } from '../ui/label';
+import { Badge } from '../ui/badge';
+import { cn } from '@/lib/utils';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -26,8 +28,10 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Server-side search with debouncing
-  const performSearch = async (query: string) => {
+  const selectedAssetsRef = useRef(selectedAssets);
+  selectedAssetsRef.current = selectedAssets;
+
+  const performSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
       setSearchResults([]);
       setIsOpen(false);
@@ -41,9 +45,8 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
       );
       const data = await response.json();
 
-      // Filter out already selected assets
       const filtered = data.results.filter(
-        (asset: Asset) => !selectedAssets.some(s => s.symbol === asset.symbol)
+        (asset: Asset) => !selectedAssetsRef.current.some(s => s.symbol === asset.symbol)
       );
 
       setSearchResults(filtered);
@@ -55,11 +58,11 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const debouncedSearch = useMemo(
     () => debounce(performSearch, 150),
-    [selectedAssets]
+    [performSearch]
   );
 
   useEffect(() => {
@@ -67,7 +70,6 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
     return () => debouncedSearch.cancel();
   }, [searchQuery, debouncedSearch]);
 
-  // Handle asset selection
   const handleSelectAsset = (asset: Asset) => {
     if (selectedAssets.length >= maxSelections) {
       alert(`Maximum ${maxSelections} assets allowed`);
@@ -81,16 +83,13 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
     inputRef.current?.focus();
   };
 
-  // Handle asset removal
   const handleRemoveAsset = (symbol: string) => {
     onChange(selectedAssets.filter(a => a.symbol !== symbol));
   };
 
-  // Keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) {
       if (e.key === 'Backspace' && !searchQuery && selectedAssets.length > 0) {
-        // Remove last tag on backspace
         handleRemoveAsset(selectedAssets[selectedAssets.length - 1].symbol);
       }
       return;
@@ -124,7 +123,6 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
     }
   };
 
-  // Scroll highlighted item into view
   useEffect(() => {
     if (isOpen && dropdownRef.current) {
       const highlightedElement = dropdownRef.current.querySelector(
@@ -134,7 +132,6 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
     }
   }, [highlightedIndex, isOpen]);
 
-  // Click outside handler
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -152,35 +149,39 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
   }, []);
 
   return (
-    <div className={styles.filterSection}>
-      <div className={styles.sectionLabel}>Basic Filters</div>
-      <div className={styles.inputGroup}>
-        <label className={styles.inputLabel}>Asset</label>
-        <div className={styles.assetAutocompleteWrapper}>
+    <div className="mb-6 last:mb-0">
+      <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider mb-3">
+        Basic Filters
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-sm font-medium">Asset</Label>
+        <div className="relative">
           <div
-            className={styles.assetTagInput}
+            className="w-full min-h-[38px] p-1 px-2 bg-background border border-input rounded-md flex flex-wrap gap-1.5 items-center cursor-text transition-all hover:border-gray-300 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/10"
             onClick={() => inputRef.current?.focus()}
           >
-            <div className={styles.assetTags}>
-              {/* Selected asset tags */}
+            <div className="flex flex-wrap gap-1.5">
               {selectedAssets.map(asset => (
-                <div key={asset.symbol} className={styles.assetTag}>
+                <Badge
+                  key={asset.symbol}
+                  variant="info"
+                  className="gap-1.5 py-1 px-2 rounded-full"
+                >
                   <span>{asset.symbol}</span>
                   <span
-                    className={styles.tagRemove}
+                    className="inline-flex items-center justify-center w-3.5 h-3.5 bg-blue-500 hover:bg-blue-600 rounded-full text-white text-xs leading-none cursor-pointer"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemoveAsset(asset.symbol);
                     }}
                     aria-label={`Remove ${asset.symbol}`}
                   >
-                    ×
+                    x
                   </span>
-                </div>
+                </Badge>
               ))}
             </div>
 
-            {/* Search input */}
             <input
               ref={inputRef}
               type="text"
@@ -188,7 +189,7 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={selectedAssets.length === 0 ? placeholder : ''}
-              className={styles.assetSearchInput}
+              className="flex-1 min-w-[120px] border-none outline-none p-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground"
               role="combobox"
               aria-autocomplete="list"
               aria-controls="asset-autocomplete-list"
@@ -197,19 +198,21 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
             />
           </div>
 
-          {/* Autocomplete dropdown */}
           <div
             ref={dropdownRef}
             id="asset-autocomplete-list"
             role="listbox"
-            className={`${styles.autocompleteDropdown} ${isOpen ? styles.visible : ''}`}
+            className={cn(
+              "absolute top-full left-0 right-0 mt-1 max-h-[320px] bg-popover border border-border rounded-md shadow-lg overflow-y-auto z-50",
+              isOpen ? "block" : "hidden"
+            )}
           >
             {loading ? (
-              <div className={styles.autocompleteNoResults}>
+              <div className="p-5 text-center text-muted-foreground text-sm">
                 Searching...
               </div>
             ) : searchResults.length === 0 ? (
-              <div className={styles.autocompleteNoResults}>
+              <div className="p-5 text-center text-muted-foreground text-sm">
                 No assets found
               </div>
             ) : (
@@ -220,32 +223,37 @@ export const AssetAutocomplete: React.FC<AssetAutocompleteProps> = ({
                   role="option"
                   id={`asset-option-${index}`}
                   aria-selected={index === highlightedIndex}
-                  className={`${styles.autocompleteItem} ${
-                    index === highlightedIndex ? styles.highlighted : ''
-                  }`}
+                  className={cn(
+                    "p-2.5 px-3 cursor-pointer transition-all border-b border-border last:border-b-0",
+                    index === highlightedIndex
+                      ? "bg-muted"
+                      : "hover:bg-muted/50"
+                  )}
                   onClick={() => handleSelectAsset(asset)}
                 >
-                  <div className={styles.autocompleteSymbol}>
-                    <span className={styles.autocompleteSymbolText}>{asset.symbol}</span>
-                    <span className={styles.autocompleteSymbolName}>{asset.name}</span>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold text-foreground">{asset.symbol}</span>
+                    <span className="text-xs text-muted-foreground">{asset.name}</span>
                   </div>
-                  <div className={styles.autocompleteMeta}>
-                    <span className={styles.autocompleteMetaItem}>
+                  <div className="flex gap-3 text-xs">
+                    <span className="text-muted-foreground">
                       {asset.exchanges} exchanges
                     </span>
-                    <span className={`${styles.autocompleteMetaItem} ${
-                      asset.avg_spread_pct && asset.avg_spread_pct >= 0 ? styles.positive : styles.negative
-                    }`}>
+                    <span className={cn(
+                      asset.avg_spread_pct && asset.avg_spread_pct >= 0
+                        ? "text-success"
+                        : "text-destructive"
+                    )}>
                       Avg: {asset.avg_spread_pct?.toFixed(3)}%
                     </span>
-                    <span className={styles.autocompleteMetaItem}>
+                    <span className="text-muted-foreground">
                       {asset.total_opportunities} opps
                     </span>
                   </div>
                 </div>
-            ))
-          )}
-        </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

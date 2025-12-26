@@ -39,7 +39,7 @@ function DashboardPage() {
 
         {/* Footer */}
         <div className="container mx-auto px-4 mt-8 text-center text-text-secondary text-sm">
-          <p>Data updates every 30 seconds • Asset-based funding rates view</p>
+          <p>Data updates every 30 seconds - Asset-based funding rates view</p>
           <p className="mt-1 text-xs text-text-muted">Click any asset to view historical charts</p>
         </div>
       </main>

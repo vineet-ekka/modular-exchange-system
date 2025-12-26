@@ -105,7 +105,7 @@ const ExchangeFilterPanel: React.FC<ExchangeFilterPanelProps> = ({
             </span>
           </Button>
         </SheetTrigger>
-        <SheetContent side="right" className={isCompact ? "w-[280px] p-4" : "w-[320px] p-4"}>
+        <SheetContent side="right" className="w-80 p-4">
           <SheetHeader>
             <SheetTitle className="text-sm font-semibold text-text-primary">Exchange Filters</SheetTitle>
             <SheetDescription className="text-xs text-text-tertiary">

@@ -18,7 +18,8 @@ import { Skeleton } from '../../ui/skeleton';
 import { Badge } from '../../ui/badge';
 
 const ROW_HEIGHT_COLLAPSED = 48;
-const ROW_HEIGHT_EXPANDED = 448;
+const CONTRACT_ROW_HEIGHT = 40;
+const EXPANDED_HEADER_HEIGHT = 40;
 const VIRTUALIZER_OVERSCAN = 5;
 const SKELETON_ROWS = Array.from({ length: 10 }, (_, i) => i);
 
@@ -108,21 +109,21 @@ const MemoizedDataTableRow = memo(DataTableRowComponent, (prevProps, nextProps) 
 interface DataTableProps<TData extends { asset: string }> {
   table: TanStackTable<TData>;
   loading?: boolean;
-  expandedAssets: Set<string>;
   autoExpandedAssets: Set<string>;
   onToggleExpand: (asset: string) => void;
   renderSubComponent?: (row: Row<TData>) => React.ReactNode;
   viewMode: string;
+  contractCounts: Record<string, number>;
 }
 
 export function DataTable<TData extends { asset: string }>({
   table,
   loading = false,
-  expandedAssets,
   autoExpandedAssets,
   onToggleExpand,
   renderSubComponent,
   viewMode,
+  contractCounts,
 }: DataTableProps<TData>) {
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
@@ -130,9 +131,13 @@ export function DataTable<TData extends { asset: string }>({
   const estimateSize = useCallback((index: number) => {
     const row = rows[index];
     if (!row) return ROW_HEIGHT_COLLAPSED;
-    const isExpanded = expandedAssets.has(row.original.asset);
-    return isExpanded ? ROW_HEIGHT_EXPANDED : ROW_HEIGHT_COLLAPSED;
-  }, [rows, expandedAssets]);
+    if (!row.getIsExpanded()) return ROW_HEIGHT_COLLAPSED;
+
+    const contractCount = contractCounts[row.original.asset] || 0;
+    const expandedHeight = ROW_HEIGHT_COLLAPSED + EXPANDED_HEADER_HEIGHT +
+      (contractCount * CONTRACT_ROW_HEIGHT);
+    return expandedHeight;
+  }, [rows, contractCounts]);
 
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -173,7 +178,7 @@ export function DataTable<TData extends { asset: string }>({
   return (
     <div
       ref={tableContainerRef}
-      className="relative overflow-auto h-[800px] border rounded-md"
+      className="relative border rounded-md"
     >
       <Table>
         <TableHeader className="sticky top-0 z-20 bg-background">
@@ -209,7 +214,7 @@ export function DataTable<TData extends { asset: string }>({
                   key={row.id}
                   row={row}
                   virtualRow={virtualRow}
-                  isExpanded={expandedAssets.has(row.original.asset)}
+                  isExpanded={row.getIsExpanded()}
                   isAutoExpanded={autoExpandedAssets.has(row.original.asset)}
                   onToggleExpand={onToggleExpand}
                   renderSubComponent={renderSubComponent}

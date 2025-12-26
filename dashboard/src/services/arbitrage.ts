@@ -146,6 +146,56 @@ export interface ContractArbitrageResponse {
   version: string;
 }
 
+export interface OpportunityDetailResponse {
+  opportunity: {
+    asset: string;
+    long_exchange: string;
+    long_contract: string;
+    long_rate: number;
+    long_open_interest: number | null;
+    long_interval_hours: number;
+    long_zscore: number | null;
+    short_exchange: string;
+    short_contract: string;
+    short_rate: number;
+    short_open_interest: number | null;
+    short_interval_hours: number;
+    short_zscore: number | null;
+    rate_spread: number;
+    rate_spread_pct: number;
+    apr_spread: number;
+    daily_spread: number;
+    effective_hourly_spread: number;
+  };
+  historical: {
+    daily_data: Array<{
+      date: string;
+      avg_apr_spread: number;
+      max_apr_spread: number;
+      min_apr_spread: number;
+      data_points: number;
+    }>;
+    statistics: {
+      avg_30d_spread: number | null;
+      max_30d_spread: number | null;
+      min_30d_spread: number | null;
+      data_days: number;
+    };
+  };
+  timestamp: string;
+}
+
+export const fetchOpportunityDetail = async (
+  asset: string,
+  longExchange: string,
+  shortExchange: string
+): Promise<OpportunityDetailResponse> => {
+  const response = await axios.get<OpportunityDetailResponse>(
+    `${API_URL}/api/arbitrage/opportunity-detail/${encodeURIComponent(asset)}/${encodeURIComponent(longExchange)}/${encodeURIComponent(shortExchange)}`
+  );
+  return response.data;
+};
+
 export const fetchContractArbitrageOpportunities = async (
   minSpread = 0.0001,
   page = 1,
@@ -188,6 +238,14 @@ export const fetchContractArbitrageOpportunities = async (
 
     if (filters.min_oi_combined !== undefined && filters.min_oi_combined !== null) {
       params.append('min_oi_combined', filters.min_oi_combined.toString());
+    }
+
+    if (filters.sort_by) {
+      params.append('sort_by', filters.sort_by);
+    }
+
+    if (filters.sort_dir) {
+      params.append('sort_dir', filters.sort_dir);
     }
 
     const response = await axios.get<ContractArbitrageResponse>(

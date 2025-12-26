@@ -66,8 +66,8 @@ export const createExchangeColumns = (
       );
     },
     meta: {
-      headerClassName: 'px-2 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted min-w-[85px]',
-      cellClassName: 'px-2 py-3 text-center whitespace-nowrap text-sm min-w-[85px]',
+      headerClassName: 'px-1 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted min-w-14',
+      cellClassName: 'px-1 py-2 text-center whitespace-nowrap text-sm min-w-14',
     },
     enableSorting: true,
     sortingFn: (rowA, rowB, columnId) => {

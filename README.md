@@ -26,24 +26,36 @@ An MVP cryptocurrency funding rate tracking system supporting 13 exchanges (6 CE
 
 ## Quick Start
 
-### One-Command Launch
+### Prerequisites
+- [Docker Desktop](https://docker.com/products/docker-desktop) (must be running)
+- [Python 3.8+](https://python.org/downloads)
+- [Node.js 16+](https://nodejs.org) (optional, for dashboard)
+
+### First-Time Setup
 ```bash
-# Starts everything automatically
+# 1. Clone the repository
+git clone https://github.com/yourusername/modular-exchange-system.git
+cd modular-exchange-system
+
+# 2. Start Docker Desktop (must be running before next step)
+
+# 3. Run setup (creates .env files, installs dependencies, starts containers)
+python setup.py
+
+# 4. Start the system
 python start.py
 
-# On Windows, can also use:
-python start.py
+# 5. (Optional) Verify everything is working
+python verify_setup.py
 ```
 
-This automatically:
-1. Checks prerequisites (Python, Node, Docker)
-2. Starts PostgreSQL database
-3. Installs npm dependencies (if needed)
-4. Starts API server
-5. Starts React dashboard  
-6. Starts data collector with 30-second updates (logs to `data_collector.log`)
-7. Starts background historical data refresh (30-day backfill)
-8. Opens browser automatically
+### What setup.py does
+1. Creates `.env` from `.env.example`
+2. Creates `dashboard/.env` from `dashboard/.env.example`
+3. Installs Python dependencies (`pip install -r requirements.txt`)
+4. Installs npm dependencies (`npm install` in dashboard/)
+5. Pulls and starts Docker containers (PostgreSQL, Redis)
+6. Verifies database connection
 
 ### Access Points
 - **Dashboard**: http://localhost:3000
@@ -62,7 +74,7 @@ This README provides a high-level overview and quickstart guide. For detailed te
   - Interactive Swagger UI at http://localhost:8000/docs
 
 - **[docs/EXCHANGES.md](docs/EXCHANGES.md)** - Exchange integration details
-  - Per-exchange specifications (15 exchanges)
+  - Per-exchange specifications (13 active exchanges)
   - Symbol normalization patterns
   - Rate limits and historical data availability
   - Exchange comparison table
@@ -98,7 +110,7 @@ This README provides a high-level overview and quickstart guide. For detailed te
 - **Unique Assets**: 700+ with cross-exchange comparison
 - **Update Frequency**: 30-second real-time refresh
 - **Historical Coverage**: 30-day rolling window
-- **API Endpoints**: 44 RESTful endpoints
+- **API Endpoints**: 42 RESTful endpoints
 - **Database Tables**: 9 core tables + materialized views (real-time, historical, streaming, websocket, statistics, metadata, arbitrage, funding_statistics, query_performance)
 - **Infrastructure**: PostgreSQL database, Redis cache, pgAdmin web interface
 
@@ -324,17 +336,11 @@ cd modular-exchange-system
 
 #### 2. Install Dependencies
 ```bash
-# Python dependencies from requirements.txt
+# Python dependencies (all required packages included)
 pip install -r requirements.txt
-
-# CRITICAL: Install missing dependencies not in requirements.txt
-pip install fastapi uvicorn psutil scipy websockets
 
 # Dashboard dependencies
 cd dashboard && npm install && cd ..
-
-# For Z-Score implementation (in progress)
-cd dashboard && npm install react-window react-window-infinite-loader @types/react-window && cd ..
 ```
 
 #### 3. Start PostgreSQL
@@ -434,7 +440,7 @@ ACTIVE_SCHEDULE = "default"
 
 ## API Documentation
 
-### Complete API Endpoints (43 Total)
+### Complete API Endpoints (42 Total)
 
 #### Data Retrieval Endpoints
 ```bash

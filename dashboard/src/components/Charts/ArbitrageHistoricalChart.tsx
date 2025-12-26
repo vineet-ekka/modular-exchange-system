@@ -12,6 +12,7 @@ import {
   Legend
 } from 'recharts';
 import { Card } from '../ui/card';
+import { Button } from '../ui/button';
 
 interface HistoricalDataPoint {
   timestamp: string;
@@ -118,16 +119,10 @@ const ArbitrageHistoricalChart: React.FC<ArbitrageHistoricalChartProps> = ({
     }
   }, [longExchange, longContract, shortExchange, shortContract]);
 
+  // Fetch on mount/dependency change and auto-refresh every 30 seconds
   useEffect(() => {
     fetchHistoricalData();
-  }, [fetchHistoricalData]);
-
-  // Auto-refresh every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchHistoricalData();
-    }, 30000);
-
+    const interval = setInterval(fetchHistoricalData, 30000);
     return () => clearInterval(interval);
   }, [fetchHistoricalData]);
 
@@ -366,43 +361,33 @@ const ArbitrageHistoricalChart: React.FC<ArbitrageHistoricalChartProps> = ({
 
         {/* Time Range Selector */}
         <div className="flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600 mr-2">Time Period:</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground mr-2">Time Period:</span>
             {[1, 7, 14, 30].map(period => (
-              <button
+              <Button
                 key={period}
+                variant={timeRange === period ? "default" : "outline"}
+                size="sm"
                 onClick={() => setTimeRange(period)}
-                className={clsx(
-                  'px-3 py-1 rounded text-sm font-medium transition-colors',
-                  timeRange === period
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                )}
               >
                 {period}D
-              </button>
+              </Button>
             ))}
           </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={fetchHistoricalData}
-              className="px-3 py-1 bg-white text-text-secondary hover:bg-gray-100 border border-light-border rounded text-sm"
-            >
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={fetchHistoricalData}>
               Refresh
-            </button>
-            <button
-              onClick={exportToCSV}
-              className="px-3 py-1 bg-accent-green text-white hover:bg-green-600 rounded text-sm shadow-sm"
-            >
+            </Button>
+            <Button variant="default" size="sm" onClick={exportToCSV}>
               Export CSV
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Chart */}
         {mergedData.length > 0 ? (
           <div className="bg-white rounded-lg p-4">
-            <ResponsiveContainer width="100%" height={350}>
+            <ResponsiveContainer width="100%" height={320}>
               <LineChart
                 data={mergedData}
                 margin={{ top: 10, right: 30, left: 0, bottom: 0 }}

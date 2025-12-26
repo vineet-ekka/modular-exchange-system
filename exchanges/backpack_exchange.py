@@ -11,6 +11,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class BackpackExchange(BaseExchange):
@@ -285,8 +286,8 @@ class BackpackExchange(BaseExchange):
                     progress = ((i + 1) / len(symbols)) * 100
                     progress_callback(i + 1, len(symbols), progress, f"Processing {symbol}")
                 
-                # Small delay to respect rate limits
-                time.sleep(0.5)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('backpack')
                 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for {symbol}: {e}")

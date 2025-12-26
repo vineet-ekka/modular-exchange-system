@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class KuCoinExchange(BaseExchange):
@@ -416,8 +417,8 @@ class KuCoinExchange(BaseExchange):
                         message = f"Processing KuCoin: {symbols_processed}/{total_symbols} symbols"
                         progress_callback(symbols_processed, total_symbols, progress, message)
                     
-                    # Small delay to respect rate limits
-                    time.sleep(0.1)
+                    # Respect rate limits via token bucket
+                    rate_limiter.acquire('kucoin')
                 
                 # Batch delay
                 if i + batch_size < len(perpetuals):

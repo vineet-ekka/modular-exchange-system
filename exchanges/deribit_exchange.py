@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class DeribitExchange(BaseExchange):
@@ -386,7 +387,7 @@ class DeribitExchange(BaseExchange):
                         progress = ((i + 1) / total_symbols) * 100
                         progress_callback(i + 1, total_symbols, progress, f"Processing {symbol}")
 
-                    time.sleep(0.1)
+                    rate_limiter.acquire('deribit')
 
                 except Exception as e:
                     self.logger.error(f"Error fetching historical data for {symbol}: {str(e)}")

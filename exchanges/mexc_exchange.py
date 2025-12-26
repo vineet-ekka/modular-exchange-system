@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 import asyncio
 import aiohttp
 from asyncio_throttle import Throttler
@@ -276,9 +277,9 @@ class MexcExchange(BaseExchange):
                     if result:
                         all_data.append(result)
             
-            # Reduced delay between batches
+            # Respect rate limits via token bucket between batches
             if i + batch_size < total_contracts:
-                time.sleep(0.1)  # Reduced from 0.5s to 0.1s
+                rate_limiter.acquire('mexc')
 
         if not all_data:
             self.logger.warning("No funding rate data retrieved from MEXC")
@@ -414,7 +415,7 @@ class MexcExchange(BaseExchange):
                     break
 
                 page_num += 1
-                time.sleep(0.1)
+                rate_limiter.acquire('mexc')
 
             if all_records:
                 df = pd.DataFrame(all_records)
@@ -535,7 +536,7 @@ class MexcExchange(BaseExchange):
                         progress = ((i + 1) / total_symbols) * 100
                         progress_callback(i + 1, total_symbols, progress, f"Processing {symbol}")
 
-                    time.sleep(0.05)
+                    rate_limiter.acquire('mexc')
 
                 except Exception as e:
                     self.logger.error(f"Error fetching historical data for {symbol}: {str(e)}")

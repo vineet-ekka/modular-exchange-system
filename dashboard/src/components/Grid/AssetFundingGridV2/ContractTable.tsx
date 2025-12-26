@@ -81,59 +81,59 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
   }
 
   return (
-    <div ref={containerRef} className="min-h-[400px]">
+    <div ref={containerRef}>
       {!isVisible ? (
         <div className="flex items-center justify-center h-[400px] bg-muted/50 border-t border-b border-border">
           <span className="text-muted-foreground">Scroll to load contracts...</span>
         </div>
       ) : (
     <div className="bg-muted/50 border-t border-b border-border">
-      <Table>
+      <Table className="table-fixed w-full">
         <TableHeader>
           <TableRow className="bg-muted">
-            <TableHead className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[120px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[9%]">
               Contract Name
             </TableHead>
-            <TableHead className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[100px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[8%]">
               Exchange Name
             </TableHead>
-            <TableHead className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[6%]">
               Base Asset
             </TableHead>
-            <TableHead className="px-3 py-2 text-left font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               Quote Asset
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[60px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               Interval
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[100px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[8%]">
               Funding Rate
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[7%]">
               APR
             </TableHead>
-            <TableHead className="px-3 py-2 text-right font-medium text-muted-foreground min-w-[120px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[10%]">
               Open Interest USD
             </TableHead>
-            <TableHead className="px-3 py-2 text-right font-medium text-muted-foreground min-w-[100px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[8%]">
               Mark Price
             </TableHead>
-            <TableHead className="px-3 py-2 text-right font-medium text-muted-foreground min-w-[100px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[8%]">
               Index Price
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[6%]">
               Z-Score
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               Percentile
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               Mean(30d)
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               StdDev
             </TableHead>
-            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground min-w-[80px]">
+            <TableHead className="px-3 py-2 text-center font-medium text-muted-foreground w-[5%]">
               Actions
             </TableHead>
           </TableRow>
@@ -152,7 +152,7 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
               >
                 <TableCell
                   className={cn(
-                    'px-3 py-2 font-medium',
+                    'px-3 py-2 text-xs text-center font-medium',
                     isContractMatch && 'text-primary font-semibold'
                   )}
                 >
@@ -165,15 +165,15 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
                     className={isContractMatch ? 'text-primary font-semibold' : 'text-foreground'}
                   />
                 </TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">{contract.exchange}</TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">{contract.base_asset}</TableCell>
-                <TableCell className="px-3 py-2 text-muted-foreground">{contract.quote_asset}</TableCell>
-                <TableCell className="px-3 py-2 text-center font-medium text-muted-foreground">
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">{contract.exchange}</TableCell>
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">{contract.base_asset}</TableCell>
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">{contract.quote_asset}</TableCell>
+                <TableCell className="px-3 py-2 text-xs text-center font-medium text-muted-foreground">
                   {formatInterval(contract.funding_interval_hours)}
                 </TableCell>
                 <TableCell
                   className={cn(
-                    'px-3 py-2 text-center font-medium',
+                    'px-3 py-2 text-xs text-center font-medium',
                     contract.funding_rate > 0
                       ? 'text-green-600'
                       : contract.funding_rate < 0
@@ -185,7 +185,7 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
                 </TableCell>
                 <TableCell
                   className={cn(
-                    'px-3 py-2 text-center font-medium',
+                    'px-3 py-2 text-xs text-center font-medium',
                     (contract.apr ?? 0) > 0
                       ? 'text-green-600'
                       : (contract.apr ?? 0) < 0
@@ -197,31 +197,31 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
                     ? `${contract.apr.toFixed(2)}%`
                     : '-'}
                 </TableCell>
-                <TableCell className="px-3 py-2 text-right text-muted-foreground">
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">
                   {formatOpenInterest(contract)}
                 </TableCell>
-                <TableCell className="px-3 py-2 text-right text-muted-foreground">
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">
                   {formatPrice(contract.mark_price)}
                 </TableCell>
-                <TableCell className="px-3 py-2 text-right text-muted-foreground">
+                <TableCell className="px-3 py-2 text-xs text-center text-muted-foreground">
                   {formatPrice(contract.index_price)}
                 </TableCell>
-                <TableCell className={cn('px-3 py-2 text-center font-medium', getZScoreColor(contract.current_z_score))}>
+                <TableCell className={cn('px-3 py-2 text-xs text-center font-medium', getZScoreColor(contract.current_z_score))}>
                   {contract.current_z_score !== null && contract.current_z_score !== undefined
                     ? contract.current_z_score.toFixed(2)
                     : '-'}
                 </TableCell>
-                <TableCell className={cn('px-3 py-2 text-center font-medium', getPercentileColor(contract.current_percentile))}>
+                <TableCell className={cn('px-3 py-2 text-xs text-center font-medium', getPercentileColor(contract.current_percentile))}>
                   {contract.current_percentile !== null && contract.current_percentile !== undefined
                     ? `${Math.round(contract.current_percentile)}%`
                     : '-'}
                 </TableCell>
-                <TableCell className="px-3 py-2 text-center text-muted-foreground text-xs">
+                <TableCell className="px-3 py-2 text-center text-xs">
                   {contract.mean_30d !== null && contract.mean_30d !== undefined
                     ? `${(contract.mean_30d * 100).toFixed(4)}%`
                     : '-'}
                 </TableCell>
-                <TableCell className="px-3 py-2 text-center text-muted-foreground text-xs">
+                <TableCell className="px-3 py-2 text-center text-xs">
                   {contract.std_dev_30d !== null && contract.std_dev_30d !== undefined
                     ? `${(contract.std_dev_30d * 100).toFixed(4)}%`
                     : '-'}
@@ -244,23 +244,6 @@ const ContractTableComponent: React.FC<ContractTableProps> = ({
           })}
         </TableBody>
       </Table>
-      <div className="p-4 text-center">
-        <Button
-          variant="link"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (contracts && contracts.length > 0) {
-              const firstContract = contracts[0];
-              navigate(`/historical/${firstContract.exchange}/${firstContract.symbol}`);
-            } else {
-              navigate(`/asset/${asset}`);
-            }
-          }}
-          className="text-sm text-primary hover:text-primary/80"
-        >
-          View All History
-        </Button>
-      </div>
     </div>
       )}
     </div>

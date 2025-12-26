@@ -452,8 +452,6 @@ class BaseExchange(ABC):
             'Drift': 30,
             'Aster': 40,
             'Lighter': 20,
-            'Paradex': 20,
-            'Orderly': 20,
             'Pacifica': 20,
             'Hibachi': 20,
             'dYdX': 30

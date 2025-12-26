@@ -64,6 +64,24 @@ def print_header():
     print("="*60 + "\n", flush=True)
     sys.stdout.flush()
 
+
+def check_setup_complete():
+    """Check if first-time setup has been run."""
+    env_file = Path(".env")
+    if not env_file.exists():
+        print_status("Setup not complete - .env file missing", "error")
+        print_status("Run 'python setup.py' first to configure the system", "info")
+        return False
+
+    with open(env_file) as f:
+        content = f.read()
+        if "your_password_here" in content:
+            print_status("Setup not complete - password not configured", "error")
+            print_status("Run 'python setup.py' to complete configuration", "info")
+            return False
+
+    return True
+
 def print_status(message, status="info"):
     """Print colored status messages."""
     # Use ASCII symbols for better compatibility
@@ -714,7 +732,12 @@ def main(args=None):
     sys.stdout.flush()
     
     print_header()
-    
+
+    # Step 0: Check if setup has been run
+    if not check_setup_complete():
+        print_status("\nRun 'python verify_setup.py' to diagnose issues.", "info")
+        sys.exit(1)
+
     # Step 1: Check prerequisites
     if not check_prerequisites():
         print_status("\nPlease install missing prerequisites and try again.", "error")

@@ -1,5 +1,5 @@
 import React from 'react';
-import styles from './ArbitrageFilter.module.css';
+import { Label } from '../ui/label';
 
 interface LiquidityFilterProps {
   minOIEither: number | null;
@@ -29,14 +29,19 @@ export const LiquidityFilter: React.FC<LiquidityFilterProps> = ({
   };
 
   return (
-    <div className={styles.filterSection}>
-      <div className={styles.sectionLabel}>Liquidity Requirements</div>
+    <div className="mb-6 last:mb-0">
+      <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider mb-3">
+        Liquidity Requirements
+      </div>
 
-      <div className={styles.inputRow}>
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Min OI (Either)</label>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-sm font-medium">Min OI (Either)</Label>
           <select
-            className={styles.selectField}
+            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground cursor-pointer appearance-none transition-colors hover:border-gray-300 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 bg-no-repeat bg-[length:20px] bg-[right_8px_center] pr-10"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`
+            }}
             value={minOIEither === null ? 'null' : minOIEither}
             onChange={handleEitherChange}
           >
@@ -48,10 +53,13 @@ export const LiquidityFilter: React.FC<LiquidityFilterProps> = ({
           </select>
         </div>
 
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Min Combined OI</label>
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-sm font-medium">Min Combined OI</Label>
           <select
-            className={styles.selectField}
+            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground cursor-pointer appearance-none transition-colors hover:border-gray-300 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 bg-no-repeat bg-[length:20px] bg-[right_8px_center] pr-10"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`
+            }}
             value={minOICombined === null ? 'null' : minOICombined}
             onChange={handleCombinedChange}
           >
@@ -64,7 +72,7 @@ export const LiquidityFilter: React.FC<LiquidityFilterProps> = ({
         </div>
       </div>
 
-      <p style={{ marginTop: '8px', fontSize: '12px', color: '#A3A3A3' }}>
+      <p className="mt-2 text-xs text-muted-foreground">
         Filter by minimum open interest for trade execution feasibility
       </p>
     </div>

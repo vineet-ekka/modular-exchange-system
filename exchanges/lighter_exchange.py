@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class LighterExchange(BaseExchange):
@@ -32,12 +33,16 @@ class LighterExchange(BaseExchange):
         # API endpoints
         self.funding_rates_endpoint = f"{self.base_url}/api/v1/funding-rates"
         self.historical_fundings_endpoint = f"{self.base_url}/api/v1/fundings"
+        self.order_book_details_endpoint = f"{self.base_url}/api/v1/orderBookDetails"
 
         # Cache for contract metadata
         self.contract_metadata = {}
 
         # Store active markets
         self.active_markets = []
+
+        # Cache for order book details (open interest, last trade price)
+        self.order_book_details = {}
 
         self.logger.info("Lighter exchange initialized with REST API")
 
@@ -91,11 +96,54 @@ class LighterExchange(BaseExchange):
 
             self.logger.info(f"Fetched {len(df)} contracts from Lighter")
 
+            # Fetch order book details for open interest data
+            self.order_book_details = self._fetch_order_book_details()
+
+            if self.order_book_details:
+                self.logger.info(f"OI data available for {len(self.order_book_details)} markets")
+            else:
+                self.logger.warning("No OI data fetched - all contracts will have 0 OI")
+
             return df
 
         except Exception as e:
             self.logger.error(f"Error fetching Lighter data: {e}")
             return pd.DataFrame()
+
+    def _fetch_order_book_details(self) -> Dict[int, Dict]:
+        """
+        Fetch open interest and price data from orderBookDetails endpoint.
+        Returns a dict keyed by market_id with open_interest and last_trade_price.
+        """
+        try:
+            response = self.safe_request(self.order_book_details_endpoint)
+            if not response:
+                self.logger.warning("Failed to fetch orderBookDetails from Lighter API")
+                return {}
+
+            order_book_details = response.get('order_book_details', [])
+            if not order_book_details:
+                self.logger.warning("No order_book_details in response")
+                return {}
+
+            result = {}
+            for detail in order_book_details:
+                market_id = detail.get('market_id')
+                if market_id is not None:
+                    try:
+                        result[market_id] = {
+                            'open_interest': float(detail.get('open_interest', 0) or 0),
+                            'last_trade_price': float(detail.get('last_trade_price', 0) or 0)
+                        }
+                    except (ValueError, TypeError):
+                        continue
+
+            self.logger.info(f"Fetched order book details for {len(result)} markets")
+            return result
+
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch orderBookDetails: {e}")
+            return {}
 
     def normalize_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -152,6 +200,23 @@ class LighterExchange(BaseExchange):
                 except (ValueError, TypeError):
                     return None
 
+            # Calculate USD open interest from order book details
+            def calculate_usd_open_interest(row):
+                try:
+                    market_id = row.get('market_id')
+                    if market_id is None:
+                        return 0
+                    # Convert numpy.int64 to Python int for dictionary lookup
+                    market_id = int(market_id)
+                    if market_id not in self.order_book_details:
+                        return 0
+                    details = self.order_book_details[market_id]
+                    oi = details.get('open_interest', 0)
+                    price = details.get('last_trade_price', 0)
+                    return oi * price if oi and price else 0
+                except (ValueError, TypeError):
+                    return 0
+
             # Create normalized DataFrame
             normalized = pd.DataFrame({
                 'exchange': 'Lighter',  # Use Lighter as the exchange name
@@ -162,9 +227,9 @@ class LighterExchange(BaseExchange):
                 'funding_rate': pd.to_numeric(df.get('rate', 0), errors='coerce') / 8,  # Divide by 8 for CEX standard alignment
                 'funding_interval_hours': 8,  # Using 8-hour equivalent rate format (CEX standard)
                 'apr': df['rate'].apply(calculate_apr) if 'rate' in df.columns else None,
-                'index_price': None,  # Not provided in the funding-rates endpoint
-                'mark_price': None,   # Not provided in the funding-rates endpoint
-                'open_interest': 0,  # Not provided in the funding-rates endpoint
+                'index_price': None,  # Not available from REST API
+                'mark_price': None,   # Not available from REST API
+                'open_interest': df.apply(calculate_usd_open_interest, axis=1),
                 'contract_type': 'PERPETUAL',
                 'market_type': 'Lighter Aggregated',  # Lighter aggregates from multiple exchanges
             })
@@ -360,8 +425,8 @@ class LighterExchange(BaseExchange):
                     progress = ((i + 1) / len(market_ids)) * 100
                     progress_callback(i + 1, len(market_ids), progress, f"Processing market {market_id}")
 
-                # Add small delay to avoid overwhelming the API
-                time.sleep(0.5)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('lighter')
 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for market_id {market_id}: {e}")

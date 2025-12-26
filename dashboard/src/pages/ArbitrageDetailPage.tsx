@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Layout/Header';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { ContractArbitrageOpportunity } from '../services/arbitrage';
+import { ContractArbitrageOpportunity, fetchOpportunityDetail } from '../services/arbitrage';
 import ArbitrageHistoricalChart from '../components/Charts/ArbitrageHistoricalChart';
 import clsx from 'clsx';
 
@@ -16,28 +16,29 @@ const ArbitrageDetailPage: React.FC = () => {
     location.state?.opportunity || null
   );
   const [loading, setLoading] = useState(!opportunity);
+  const [error, setError] = useState<string | null>(null);
 
-  const formatPercentage = (value?: number | null, decimals = 3) => {
+  const formatPercentage = useCallback((value?: number | null, decimals = 3) => {
     if (value === null || value === undefined) return '-';
     const percentage = value * 100;
     return `${percentage >= 0 ? '+' : ''}${percentage.toFixed(decimals)}%`;
-  };
+  }, []);
 
-  const formatPercentageValue = (value?: number | null, decimals = 3) => {
+  const formatPercentageValue = useCallback((value?: number | null, decimals = 3) => {
     if (value === null || value === undefined) return '-';
     return `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}%`;
-  };
+  }, []);
 
-  const formatOpenInterest = (value?: number | null) => {
+  const formatOpenInterest = useCallback((value?: number | null) => {
     if (value === null || value === undefined) return '-';
     const absValue = Math.abs(value);
     if (absValue >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
     if (absValue >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
     if (absValue >= 1e3) return `$${(value / 1e3).toFixed(0)}K`;
     return `$${value.toFixed(0)}`;
-  };
+  }, []);
 
-  const getZScoreBadge = (zScore?: number | null, label = 'Z-Score') => {
+  const getZScoreBadge = useCallback((zScore?: number | null, label = 'Z-Score') => {
     if (zScore === null || zScore === undefined) return null;
     const absZ = Math.abs(zScore);
     let variant: 'danger' | 'warning' | 'info' | 'neutral' = 'neutral';
@@ -52,9 +53,9 @@ const ArbitrageDetailPage: React.FC = () => {
         </Badge>
       </div>
     );
-  };
+  }, []);
 
-  const calculatePeriodicReturns = () => {
+  const periodicReturns = useMemo(() => {
     if (!opportunity) return [];
     const dailySpread = opportunity.daily_spread || 0;
     return [
@@ -65,23 +66,106 @@ const ArbitrageDetailPage: React.FC = () => {
       { period: '90 Days', value: dailySpread * 90, description: 'Quarterly cumulative funding' },
       { period: '1 Year', value: dailySpread * 365, description: 'Annual cumulative funding' }
     ];
-  };
+  }, [opportunity]);
 
   useEffect(() => {
     if (!opportunity && asset && longExchange && shortExchange) {
-      // TODO: Fetch opportunity data from API if not passed through state
-      setLoading(false);
+      setLoading(true);
+      setError(null);
+      fetchOpportunityDetail(asset, longExchange, shortExchange)
+        .then((response) => {
+          const opp = response.opportunity;
+          const mapped: ContractArbitrageOpportunity = {
+            asset: opp.asset,
+            long_contract: opp.long_contract,
+            long_exchange: opp.long_exchange,
+            long_rate: opp.long_rate,
+            long_apr: null,
+            long_interval_hours: opp.long_interval_hours,
+            long_zscore: opp.long_zscore,
+            long_percentile: null,
+            long_open_interest: opp.long_open_interest,
+            short_contract: opp.short_contract,
+            short_exchange: opp.short_exchange,
+            short_rate: opp.short_rate,
+            short_apr: null,
+            short_interval_hours: opp.short_interval_hours,
+            short_zscore: opp.short_zscore,
+            short_percentile: null,
+            short_open_interest: opp.short_open_interest,
+            rate_spread: opp.rate_spread,
+            rate_spread_pct: opp.rate_spread_pct,
+            apr_spread: opp.apr_spread,
+            spread_zscore: null,
+            spread_mean: null,
+            spread_std_dev: null,
+            long_hourly_rate: opp.long_rate / opp.long_interval_hours,
+            short_hourly_rate: opp.short_rate / opp.short_interval_hours,
+            effective_hourly_spread: opp.effective_hourly_spread,
+            sync_period_hours: (() => {
+              const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+              return (opp.long_interval_hours * opp.short_interval_hours) / gcd(opp.long_interval_hours, opp.short_interval_hours);
+            })(),
+            long_sync_funding: (() => {
+              const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+              const syncPeriod = (opp.long_interval_hours * opp.short_interval_hours) / gcd(opp.long_interval_hours, opp.short_interval_hours);
+              return opp.long_rate * (syncPeriod / opp.long_interval_hours);
+            })(),
+            short_sync_funding: (() => {
+              const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+              const syncPeriod = (opp.long_interval_hours * opp.short_interval_hours) / gcd(opp.long_interval_hours, opp.short_interval_hours);
+              return opp.short_rate * (syncPeriod / opp.short_interval_hours);
+            })(),
+            sync_period_spread: (() => {
+              const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+              const syncPeriod = (opp.long_interval_hours * opp.short_interval_hours) / gcd(opp.long_interval_hours, opp.short_interval_hours);
+              const longSync = opp.long_rate * (syncPeriod / opp.long_interval_hours);
+              const shortSync = opp.short_rate * (syncPeriod / opp.short_interval_hours);
+              return Math.abs(longSync) + Math.abs(shortSync);
+            })(),
+            long_daily_funding: opp.long_rate * (24 / opp.long_interval_hours),
+            short_daily_funding: opp.short_rate * (24 / opp.short_interval_hours),
+            daily_spread: opp.daily_spread,
+            weekly_spread: opp.daily_spread * 7,
+            monthly_spread: opp.daily_spread * 30,
+            quarterly_spread: opp.daily_spread * 90,
+            yearly_spread: opp.daily_spread * 365,
+            is_significant: false,
+          };
+          setOpportunity(mapped);
+        })
+        .catch((err) => {
+          setError(err.response?.status === 404 ? 'Opportunity not found' : 'Failed to load opportunity');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
     }
   }, [opportunity, asset, longExchange, shortExchange]);
 
-  if (!opportunity) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="w-full px-2 py-6">
+        <div className="w-full px-6 py-6">
           <Card className="bg-white border border-border shadow-sm p-8">
             <div className="text-center py-8">
-              <p className="text-text-secondary mb-4">Opportunity data not found</p>
+              <p className="text-text-secondary">Loading opportunity...</p>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !opportunity) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="w-full px-6 py-6">
+          <Card className="bg-white border border-border shadow-sm p-8">
+            <div className="text-center py-8">
+              <p className="text-text-secondary mb-4">{error || 'Opportunity data not found'}</p>
               <Button variant="default" onClick={() => navigate('/arbitrage')}>
                 Back to Arbitrage Opportunities
               </Button>
@@ -92,12 +176,10 @@ const ArbitrageDetailPage: React.FC = () => {
     );
   }
 
-  const periodicReturns = calculatePeriodicReturns();
-
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <div className="w-full px-2 py-6">
+      <div className="w-full px-6 py-6">
         {/* Back Button and Header */}
         <div className="mb-6">
           <Button
@@ -167,6 +249,9 @@ const ArbitrageDetailPage: React.FC = () => {
                 <div className="text-xs text-text-tertiary opacity-75">{item.description}</div>
               </div>
             ))}
+          </div>
+          <div className="mt-3 pt-2 border-t border-border-subtle text-xs text-text-tertiary text-center">
+            Projected returns based on current funding rates. Actual returns may vary significantly as rates fluctuate.
           </div>
         </Card>
 
@@ -364,4 +449,4 @@ const ArbitrageDetailPage: React.FC = () => {
   );
 };
 
-export default ArbitrageDetailPage;
+export default memo(ArbitrageDetailPage);

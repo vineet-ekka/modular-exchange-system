@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import styles from './ArbitrageFilter.module.css';
+import { Label } from '../ui/label';
 
 interface APRRangeFilterProps {
   minApr: number | null;
@@ -14,7 +14,6 @@ export const APRRangeFilter: React.FC<APRRangeFilterProps> = ({
 }) => {
   const [error, setError] = useState<string | null>(null);
 
-  // Validate range
   useEffect(() => {
     if (minApr !== null && maxApr !== null && minApr > maxApr) {
       setError('Min APR cannot exceed Max APR');
@@ -40,14 +39,19 @@ export const APRRangeFilter: React.FC<APRRangeFilterProps> = ({
   };
 
   return (
-    <div className={styles.filterSection}>
-      <div className={styles.sectionLabel}>APR Spread</div>
+    <div className="mb-6 last:mb-0">
+      <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider mb-3">
+        APR Spread
+      </div>
 
-      <div className={styles.inputRow}>
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Min APR Spread</label>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-sm font-medium">Min APR Spread</Label>
           <select
-            className={styles.selectField}
+            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground cursor-pointer appearance-none transition-colors hover:border-gray-300 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 bg-no-repeat bg-[length:20px] bg-[right_8px_center] pr-10"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`
+            }}
             value={minApr === null ? 'null' : minApr}
             onChange={handleMinChange}
             aria-label="Min APR"
@@ -63,10 +67,13 @@ export const APRRangeFilter: React.FC<APRRangeFilterProps> = ({
           </select>
         </div>
 
-        <div className={styles.inputGroup}>
-          <label className={styles.inputLabel}>Max APR Spread</label>
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-sm font-medium">Max APR Spread</Label>
           <select
-            className={styles.selectField}
+            className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground cursor-pointer appearance-none transition-colors hover:border-gray-300 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 bg-no-repeat bg-[length:20px] bg-[right_8px_center] pr-10"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`
+            }}
             value={maxApr === null ? 'null' : maxApr}
             onChange={handleMaxChange}
             aria-label="Max APR"
@@ -82,7 +89,7 @@ export const APRRangeFilter: React.FC<APRRangeFilterProps> = ({
       </div>
 
       {error && (
-        <p style={{ marginTop: '8px', fontSize: '12px', color: '#DC2626' }}>
+        <p className="mt-2 text-xs text-destructive">
           {error}
         </p>
       )}

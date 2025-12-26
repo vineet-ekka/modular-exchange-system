@@ -1,46 +1,165 @@
-# Getting Started with Create React App
+# BasisPoint Dashboard
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React dashboard for multi-exchange cryptocurrency funding rate visualization.
+
+## Prerequisites
+
+- Node.js 18+
+- npm 9+
+- Backend API running on port 8000 (see root README for backend setup)
+
+## Quick Start
+
+### 1. Install Dependencies
+
+```bash
+npm install
+```
+
+### 2. Setup Environment
+
+```bash
+npm run setup
+```
+
+This automatically creates `.env` from `.env.example`. Alternatively, copy manually:
+
+```bash
+cp .env.example .env
+```
+
+### 3. Start Development Server
+
+```bash
+npm start
+```
+
+Opens [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Available Scripts
 
-In the project directory, you can run:
+| Script | Description |
+|--------|-------------|
+| `npm run setup` | Create .env from template (safe to run multiple times) |
+| `npm start` | Start development server (port 3000) |
+| `npm run build` | Create production build in `build/` |
+| `npm test` | Run test suite |
+| `npm run analyze` | Analyze bundle size |
+| `npx tsc --noEmit` | TypeScript type checking |
 
-### `npm start`
+## Environment Variables
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `REACT_APP_API_URL` | Yes | `http://localhost:8000` | Backend API server URL |
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Project Structure
 
-### `npm test`
+```
+src/
+  components/           # React components
+    ui/                 # shadcn/ui base components (Button, Card, Table, etc.)
+    Grid/               # Data grid components (AssetFundingGridV2)
+    Charts/             # Visualization (Recharts-based)
+    Arbitrage/          # Arbitrage filtering and display
+    Cards/              # Dashboard metric cards
+    Layout/             # Page layout components
+  lib/                  # Shared utilities
+    utils.ts            # Class name merging (cn function)
+    queryClient.ts      # TanStack Query configuration
+  pages/                # Route page components
+  services/             # API client and type definitions
+  types/                # TypeScript interfaces
+  hooks/                # Custom React hooks
+```
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Tech Stack
 
-### `npm run build`
+- **React 19** - UI framework
+- **TypeScript 4.9** - Type safety
+- **TanStack Table 8** - Headless table library
+- **TanStack Query 5** - Server state management with 30s auto-refresh
+- **Tailwind CSS 3.4** - Utility-first styling
+- **shadcn/ui** - Accessible component primitives (built on Radix UI)
+- **Recharts 3** - Charting library
+- **Axios** - HTTP client
+- **React Router 6** - Client-side routing
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Troubleshooting
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### TypeScript Errors
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Run type checking to identify issues:
 
-### `npm run eject`
+```bash
+npx tsc --noEmit
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+### API Connection Failed
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+1. Ensure backend is running:
+   ```bash
+   python api.py
+   ```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+2. Verify `REACT_APP_API_URL` in `.env` matches API port
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+3. Check API health:
+   ```bash
+   curl http://localhost:8000/api/health
+   ```
 
-## Learn More
+### Missing Modules / Import Errors
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Reinstall dependencies:
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+### Development Server Hangs
+
+If `npm start` hangs at "Starting the development server...":
+
+1. Delete node_modules and reinstall:
+   ```bash
+   rm -rf node_modules package-lock.json
+   npm install
+   ```
+
+2. Clear npm cache if problem persists:
+   ```bash
+   npm cache clean --force
+   npm install
+   ```
+
+### Port 3000 Already in Use
+
+Find and kill the process using port 3000:
+
+**Windows:**
+```bash
+netstat -ano | findstr :3000
+taskkill /PID <pid> /F
+```
+
+**Linux/Mac:**
+```bash
+lsof -i :3000
+kill -9 <pid>
+```
+
+## Build for Production
+
+```bash
+npm run build
+```
+
+Creates optimized production build in `build/` directory. Serve with any static file server.
+
+## Related Documentation
+
+- [API Reference](../docs/API_REFERENCE.md) - Backend API endpoints
+- [Main README](../README.md) - Full system setup
+- [Troubleshooting](../docs/TROUBLESHOOTING.md) - Common issues

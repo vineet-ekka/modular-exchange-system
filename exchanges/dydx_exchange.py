@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 from .base_exchange import BaseExchange
+from utils.rate_limiter import rate_limiter
 import logging
 
 class DydxExchange(BaseExchange):
@@ -285,7 +286,7 @@ class DydxExchange(BaseExchange):
                         progress = ((i + 1) / total_markets) * 100
                         progress_callback(i + 1, total_markets, progress, f"Processing {ticker}")
 
-                    time.sleep(0.1)
+                    rate_limiter.acquire('dydx')
 
                 except Exception as e:
                     self.logger.error(f"Error fetching historical data for {ticker}: {str(e)}")

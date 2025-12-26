@@ -4,7 +4,9 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
+  getExpandedRowModel,
   SortingState,
+  ExpandedState,
   Row,
 } from '@tanstack/react-table';
 import { useQueryClient } from '@tanstack/react-query';
@@ -39,7 +41,7 @@ const AssetFundingGridV2: React.FC = () => {
   const [autoExpandedAssets, setAutoExpandedAssets] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>('apr');
   const [sorting, setSorting] = useState<SortingState>([{ id: 'asset', desc: false }]);
-  const [expandedAssets, setExpandedAssets] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<ExpandedState>({});
   const [userCollapsedAssets, setUserCollapsedAssets] = useState<Set<string>>(new Set());
   const fetchedAssetsRef = useRef<Set<string>>(new Set());
 
@@ -68,12 +70,16 @@ const AssetFundingGridV2: React.FC = () => {
   };
 
   const toggleAssetExpansion = useCallback(async (asset: string) => {
-    if (expandedAssets.has(asset)) {
+    const expandedObj = expanded === true ? {} : expanded;
+    const isCurrentlyExpanded = expandedObj[asset] === true;
+
+    if (isCurrentlyExpanded) {
       setUserCollapsedAssets(prev => new Set(prev).add(asset));
-      setExpandedAssets(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(asset);
-        return newSet;
+      setExpanded(prev => {
+        const prevObj = prev === true ? {} : prev;
+        const newState = { ...prevObj };
+        delete newState[asset];
+        return newState;
       });
     } else {
       const cachedContracts = queryClient.getQueryData<ContractDetails[]>(
@@ -114,9 +120,12 @@ const AssetFundingGridV2: React.FC = () => {
           });
         }
       }
-      setExpandedAssets(prev => new Set(prev).add(asset));
+      setExpanded(prev => {
+        const prevObj = prev === true ? {} : prev;
+        return { ...prevObj, [asset]: true };
+      });
     }
-  }, [expandedAssets, contractsData, loadingContracts, queryClient]);
+  }, [expanded, contractsData, loadingContracts, queryClient]);
 
   const exchanges = useMemo(() => {
     if (gridData.length === 0) return [];
@@ -143,7 +152,7 @@ const AssetFundingGridV2: React.FC = () => {
   useEffect(() => {
     if (!deferredSearchTerm || deferredSearchTerm.length < 2) {
       setAutoExpandedAssets(new Set());
-      setExpandedAssets(new Set());
+      setExpanded({});
       return;
     }
 
@@ -209,14 +218,15 @@ const AssetFundingGridV2: React.FC = () => {
         ]);
         setContractsData(prev => ({ ...prev, ...newContractsData }));
         setAutoExpandedAssets(assetsToExpand);
-        setExpandedAssets(prev => {
-          const newSet = new Set(prev);
+        setExpanded(prev => {
+          const prevObj = prev === true ? {} : prev;
+          const newState = { ...prevObj };
           assetsToExpand.forEach(asset => {
             if (!userCollapsedAssets.has(asset)) {
-              newSet.add(asset);
+              newState[asset] = true;
             }
           });
-          return newSet;
+          return newState;
         });
       }
     };
@@ -238,6 +248,14 @@ const AssetFundingGridV2: React.FC = () => {
     return result;
   }, [contractsData, filterState.selectedExchanges]);
 
+  const contractCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    Object.entries(filteredContractsMap).forEach(([asset, contracts]) => {
+      counts[asset] = contracts.length;
+    });
+    return counts;
+  }, [filteredContractsMap]);
+
   const columns = useColumns(
     visibleExchanges,
     viewMode,
@@ -249,11 +267,14 @@ const AssetFundingGridV2: React.FC = () => {
     columns,
     state: {
       sorting,
+      expanded,
     },
     onSortingChange: setSorting,
+    onExpandedChange: setExpanded,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getRowId: (row) => row.asset,
     autoResetPageIndex: false,
     autoResetExpanded: false,
@@ -362,11 +383,11 @@ const AssetFundingGridV2: React.FC = () => {
         <DataTable
           table={table}
           loading={loading}
-          expandedAssets={expandedAssets}
           autoExpandedAssets={autoExpandedAssets}
           onToggleExpand={toggleAssetExpansion}
           renderSubComponent={renderSubComponent}
           viewMode={viewMode}
+          contractCounts={contractCounts}
         />
 
         <div className="px-6 py-3 border-t border-border bg-muted flex items-center justify-between text-xs">

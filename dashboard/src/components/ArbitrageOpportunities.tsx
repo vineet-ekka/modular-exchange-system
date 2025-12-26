@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useArbitrageOpportunities } from '../hooks/useDataQueries';
 import { ContractArbitrageOpportunity } from '../services/arbitrage';
@@ -37,31 +37,29 @@ const ArbitrageOpportunities: React.FC = () => {
     isFetching,
     error: queryError,
     refetch
-  } = useArbitrageOpportunities(minSpread, currentPage, pageSize, filterParams);
+  } = useArbitrageOpportunities(minSpread, currentPage, pageSize, filterParams, sortKey, sortDirection);
 
   const error = queryError ? 'Failed to fetch arbitrage opportunities' : null;
 
-  const formatPercentage = (value?: number | null) => {
+  const formatPercentage = useCallback((value?: number | null) => {
     if (value === null || value === undefined) return '-';
     const percentage = value * 100;
     return `${percentage >= 0 ? '+' : ''}${percentage.toFixed(3)}%`;
-  };
+  }, []);
 
-  // For values that are already in percentage format (not decimals)
-  const formatPercentageValue = (value?: number | null) => {
+  const formatPercentageValue = useCallback((value?: number | null) => {
     if (value === null || value === undefined) return '-';
     return `${value >= 0 ? '+' : ''}${value.toFixed(3)}%`;
-  };
+  }, []);
 
-  const formatAPR = (value?: number | null) => {
+  const formatAPR = useCallback((value?: number | null) => {
     if (value === null || value === undefined) return '-';
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-  };
+  }, []);
 
-  const formatOpenInterest = (value?: number | null) => {
+  const formatOpenInterest = useCallback((value?: number | null) => {
     if (value === null || value === undefined) return '-';
     const absValue = Math.abs(value);
-
     if (absValue >= 1e9) {
       return `$${(value / 1e9).toFixed(2)}B`;
     } else if (absValue >= 1e6) {
@@ -71,29 +69,32 @@ const ArbitrageOpportunities: React.FC = () => {
     } else {
       return `$${value.toFixed(0)}`;
     }
-  };
+  }, []);
 
-  const getZScoreBadge = (zScore?: number | null) => {
+  const getZScoreBadge = useCallback((zScore?: number | null) => {
     if (zScore === null || zScore === undefined) return null;
-
     const absZ = Math.abs(zScore);
     let variant: 'danger' | 'warning' | 'info' | 'neutral' = 'neutral';
-
     if (absZ >= 3) variant = 'danger';
     else if (absZ >= 2) variant = 'warning';
     else if (absZ >= 1) variant = 'info';
-
     return (
       <Badge variant={variant}>
         Z: {zScore.toFixed(2)}
       </Badge>
     );
-  };
+  }, []);
 
 
   const handleSort = (key: string, direction: 'asc' | 'desc') => {
-    setSortKey(key);
+    const sortKeyMap: Record<string, string> = {
+      'rateSpread': 'apr_spread',
+      'zscores': 'spread_zscore',
+      'openInterest': 'open_interest',
+    };
+    setSortKey(sortKeyMap[key] || key);
     setSortDirection(direction);
+    setCurrentPage(1);
   };
 
   const handleRowClick = (opportunity: ContractArbitrageOpportunity) => {
@@ -103,67 +104,9 @@ const ArbitrageOpportunities: React.FC = () => {
     );
   };
 
-  const sortData = (dataToSort: ContractArbitrageOpportunity[]) => {
-    if (!sortKey) return dataToSort;
+  const opportunities = data?.opportunities || [];
 
-    const sorted = [...dataToSort].sort((a, b) => {
-      let aValue: number | null = null;
-      let bValue: number | null = null;
-
-      switch (sortKey) {
-        case 'rateSpread':
-          aValue = a.rate_spread_pct;
-          bValue = b.rate_spread_pct;
-          break;
-        default:
-          return 0;
-      }
-
-      // Handle null values
-      if (aValue === null || aValue === undefined) return 1;
-      if (bValue === null || bValue === undefined) return -1;
-
-      // Sort based on direction
-      if (sortDirection === 'asc') {
-        return aValue - bValue;
-      } else {
-        return bValue - aValue;
-      }
-    });
-
-    return sorted;
-  };
-
-
-  if (loading && !data) {
-    return (
-      <Card className="bg-white border border-border shadow-sm p-8">
-        <div className="flex flex-col items-center justify-center py-8">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-text-secondary">Loading arbitrage opportunities...</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Card className="bg-white border border-border shadow-sm p-8">
-        <div className="text-center py-8">
-          <p className="text-danger text-lg font-medium">{error}</p>
-          <Button
-            variant="default"
-            onClick={() => refetch()}
-            className="mt-4"
-          >
-            Retry
-          </Button>
-        </div>
-      </Card>
-    );
-  }
-
-  const columns = [
+  const columns = useMemo(() => [
     {
       key: 'asset',
       header: 'Asset',
@@ -266,6 +209,7 @@ const ArbitrageOpportunities: React.FC = () => {
       ),
       align: 'center' as const,
       width: '12%',
+      sortable: true,
     },
     {
       key: 'openInterest',
@@ -284,8 +228,37 @@ const ArbitrageOpportunities: React.FC = () => {
       ),
       align: 'right' as const,
       width: '11%',
+      sortable: true,
     },
-  ];
+  ], [formatPercentage, formatPercentageValue, formatAPR, formatOpenInterest, getZScoreBadge]);
+
+  if (loading && !data) {
+    return (
+      <Card className="bg-white border border-border shadow-sm p-8">
+        <div className="flex flex-col items-center justify-center py-8">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-text-secondary">Loading arbitrage opportunities...</p>
+        </div>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="bg-white border border-border shadow-sm p-8">
+        <div className="text-center py-8">
+          <p className="text-danger text-lg font-medium">{error}</p>
+          <Button
+            variant="default"
+            onClick={() => refetch()}
+            className="mt-4"
+          >
+            Retry
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -417,7 +390,7 @@ const ArbitrageOpportunities: React.FC = () => {
         )}
         <DataTable
           columns={columns}
-          data={sortData(data?.opportunities || [])}
+          data={opportunities}
           striped
           hover
           stickyHeader
@@ -445,7 +418,7 @@ const ArbitrageOpportunities: React.FC = () => {
       {/* Last Update */}
       {data && (
         <div className="text-center text-sm text-text-tertiary">
-          Last updated: {new Date().toLocaleTimeString()} • Auto-refreshing every 30 seconds
+          Last updated: {data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : '-'} • Auto-refreshing every 30 seconds
         </div>
       )}
     </div>

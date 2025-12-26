@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class ByBitExchange(BaseExchange):
@@ -167,8 +168,8 @@ class ByBitExchange(BaseExchange):
             if not cursor:
                 break
 
-            # Small delay to avoid rate limiting
-            time.sleep(0.1)
+            # Respect rate limits via token bucket
+            rate_limiter.acquire('bybit')
 
         return all_instruments
 
@@ -331,8 +332,8 @@ class ByBitExchange(BaseExchange):
                 # Set new end time for next iteration
                 current_end = last_timestamp - 1
 
-                # Small delay to avoid rate limiting
-                time.sleep(0.2)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('bybit')
 
             if not all_data:
                 self.logger.warning(f"No historical data fetched for {symbol}")
@@ -468,8 +469,8 @@ class ByBitExchange(BaseExchange):
                     progress = ((i + 1) / len(symbols)) * 100
                     progress_callback(i + 1, len(symbols), progress, f"Processing {symbol}")
 
-                # Delay to respect rate limits
-                time.sleep(0.5)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('bybit')
 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for {symbol}: {e}")

@@ -56,12 +56,19 @@ export function useArbitrageOpportunities(
   minSpread = 0.0001,
   page = 1,
   pageSize = 20,
-  filters: ArbitrageQueryFilters['filters'] = {}
+  filters: ArbitrageQueryFilters['filters'] = {},
+  sortKey?: string,
+  sortDir: 'asc' | 'desc' = 'desc'
 ): UseQueryResult<ContractArbitrageResponse, Error> {
   const filterKey = JSON.stringify(filters);
+  const filtersWithSort = {
+    ...filters,
+    sort_by: sortKey || 'apr_spread',
+    sort_dir: sortDir,
+  };
   return useQuery({
-    queryKey: ['arbitrage-opportunities', minSpread, page, pageSize, filterKey],
-    queryFn: () => fetchContractArbitrageOpportunities(minSpread, page, pageSize, filters),
+    queryKey: ['arbitrage-opportunities', minSpread, page, pageSize, filterKey, sortKey, sortDir],
+    queryFn: () => fetchContractArbitrageOpportunities(minSpread, page, pageSize, filtersWithSort),
     staleTime: 25000,
     refetchInterval: 30000,
     enabled: true,

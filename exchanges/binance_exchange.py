@@ -632,8 +632,8 @@ class BinanceExchange(BaseExchange):
                 if symbols_processed % 50 == 0:
                     print(f"BINANCE: Progress - {symbols_processed}/{total_symbols} contracts ({progress:.1f}%)")
                 
-                # Small delay to respect rate limits
-                time.sleep(0.2)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('binance')
         
         # Process COIN-M perpetuals
         print(f"BINANCE: Found {len(perpetuals_coinm)} COIN-M perpetual contracts to process")
@@ -662,8 +662,8 @@ class BinanceExchange(BaseExchange):
                 if symbols_processed % 50 == 0:
                     print(f"BINANCE: Progress - {symbols_processed}/{total_symbols} contracts ({progress:.1f}%)")
                 
-                # Small delay to respect rate limits
-                time.sleep(0.2)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('binance')
         
         # Combine all data
         if all_historical_data:

@@ -7,6 +7,14 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 import queryClient from './lib/queryClient';
 
+// Suppress benign ResizeObserver loop error from TanStack Virtual
+// This occurs when row measurements happen during CSS animations
+window.addEventListener('error', (event) => {
+  if (event.message?.includes('ResizeObserver loop')) {
+    event.stopImmediatePropagation();
+  }
+});
+
 const rootElement = document.getElementById('root');
 
 if (rootElement) {

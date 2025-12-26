@@ -21,7 +21,7 @@ POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_DATABASE = os.getenv("POSTGRES_DATABASE", "exchange_data")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres123")
 
 # Database table name where data will be stored
 DATABASE_TABLE_NAME = os.getenv("DATABASE_TABLE_NAME", "exchange_data")
@@ -47,6 +47,24 @@ EXCHANGES = {
     'edgex': False,       # Disabled - EdgeX API not accessible
     'apex': False,        # Disabled - ApeX API not accessible
     'kraken': False       # Ready but disabled
+}
+
+# Exchange name normalization map (lowercase -> display name)
+# Used for case-insensitive exchange matching in filters
+EXCHANGE_NAME_MAP = {
+    'binance': 'Binance',
+    'bybit': 'ByBit',
+    'kucoin': 'KuCoin',
+    'mexc': 'MEXC',
+    'dydx': 'dYdX',
+    'backpack': 'Backpack',
+    'hyperliquid': 'Hyperliquid',
+    'drift': 'Drift',
+    'aster': 'Aster',
+    'lighter': 'Lighter',
+    'pacifica': 'Pacifica',
+    'hibachi': 'Hibachi',
+    'deribit': 'Deribit'
 }
 
 # =============================================================================

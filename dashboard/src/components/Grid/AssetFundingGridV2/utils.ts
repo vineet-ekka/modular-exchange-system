@@ -115,7 +115,7 @@ export const formatOpenInterest = (contract: ContractDetails): string => {
   const oi = contract.open_interest;
   if (!oi) return '-';
 
-  const exchangesWithUsdOi = ['KuCoin', 'Hyperliquid'];
+  const exchangesWithUsdOi = ['KuCoin', 'Hyperliquid', 'Lighter'];
 
   if (contract.quote_asset === 'USDT' || contract.quote_asset === 'USDC') {
     let usdValue;

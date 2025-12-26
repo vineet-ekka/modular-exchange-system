@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 from exchanges.base_exchange import BaseExchange
 from config.settings import DRIFT_MIN_VOLUME_THRESHOLD
+from utils.rate_limiter import rate_limiter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -331,8 +332,8 @@ class DriftExchange(BaseExchange):
                     progress = ((i + 1) / len(symbols)) * 100
                     progress_callback(i + 1, len(symbols), progress, f"Processing {symbol}")
 
-                # Small delay to respect rate limits
-                time.sleep(0.5)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('drift')
 
             except Exception as e:
                 logger.error(f"Error fetching historical data for {symbol}: {e}")

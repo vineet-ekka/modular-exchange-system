@@ -29,12 +29,17 @@ class RateLimiter:
             'binance': 40,      # 2400/min = 40/sec
             'kucoin': 10,       # 100/10s = 10/sec
             'backpack': 10,     # Conservative default
-            'hyperliquid': 10,  # Conservative limit to avoid 429 errors
+            'hyperliquid': 2,   # Very conservative - avoid 429 errors
             'aster': 20,        # 2400/min = 40/sec, but using conservative 20/sec
             'drift': 10,        # Conservative default for Solana DEX
             'bybit': 10,        # Conservative estimate for ByBit
             'deribit': 10,      # Conservative estimate
             'kraken': 15,       # 60/10s public = 6/sec, but we fetch multiple endpoints
+            'lighter': 10,      # Conservative default
+            'pacifica': 2,      # Very conservative - avoid 429 errors
+            'hibachi': 10,      # Conservative default
+            'mexc': 20,         # Similar to aster
+            'dydx': 10,         # Conservative default
             'default': 5        # Default for unknown exchanges
         }
         
@@ -45,8 +50,8 @@ class RateLimiter:
             'backoff_until': 0
         })
         
-        # Thread lock for bucket updates
-        self.lock = threading.Lock()
+        # Per-exchange locks (so one exchange's backoff doesn't block others)
+        self.locks = defaultdict(threading.Lock)
         
         # Initialize buckets with full tokens
         for exchange in self.rate_limits:
@@ -73,7 +78,7 @@ class RateLimiter:
             requests_per_second: Maximum requests per second
         """
         self.rate_limits[exchange] = requests_per_second
-        with self.lock:
+        with self.locks[exchange.lower()]:
             if exchange not in self.buckets:
                 self.buckets[exchange]['tokens'] = requests_per_second
     
@@ -91,8 +96,8 @@ class RateLimiter:
         exchange = exchange.lower()
         rate_limit = self.get_rate_limit(exchange)
         wait_time = 0
-        
-        with self.lock:
+
+        with self.locks[exchange]:
             bucket = self.buckets[exchange]
             current_time = time.time()
             
@@ -133,18 +138,14 @@ class RateLimiter:
             exchange: Exchange name
             retry_after: Seconds to wait (from Retry-After header)
         """
-        with self.lock:
-            bucket = self.buckets[exchange.lower()]
-            
-            # Default backoff: 60 seconds if no Retry-After header
-            backoff_time = retry_after if retry_after else 60
-            
-            # Set backoff period
+        exchange_lower = exchange.lower()
+        backoff_time = retry_after if retry_after else 60
+
+        with self.locks[exchange_lower]:
+            bucket = self.buckets[exchange_lower]
             bucket['backoff_until'] = time.time() + backoff_time
-            
-            # Reset tokens to 0
             bucket['tokens'] = 0
-            
+
         print(f"! Rate limit hit for {exchange}. Backing off for {backoff_time:.1f} seconds")
     
     def reset(self, exchange: str):
@@ -154,9 +155,10 @@ class RateLimiter:
         Args:
             exchange: Exchange name
         """
-        with self.lock:
+        exchange_lower = exchange.lower()
+        with self.locks[exchange_lower]:
             rate_limit = self.get_rate_limit(exchange)
-            self.buckets[exchange.lower()] = {
+            self.buckets[exchange_lower] = {
                 'tokens': rate_limit,
                 'last_update': time.time(),
                 'backoff_until': 0
@@ -171,22 +173,21 @@ class RateLimiter:
         """
         status = {}
         current_time = time.time()
-        
-        with self.lock:
-            for exchange, bucket in self.buckets.items():
-                if exchange == 'default':
-                    continue
-                    
-                in_backoff = current_time < bucket['backoff_until']
-                backoff_remaining = max(0, bucket['backoff_until'] - current_time)
-                
-                status[exchange] = {
-                    'tokens_available': bucket['tokens'],
-                    'rate_limit': self.get_rate_limit(exchange),
-                    'in_backoff': in_backoff,
-                    'backoff_remaining': backoff_remaining if in_backoff else 0
-                }
-        
+
+        for exchange, bucket in list(self.buckets.items()):
+            if exchange == 'default':
+                continue
+
+            in_backoff = current_time < bucket['backoff_until']
+            backoff_remaining = max(0, bucket['backoff_until'] - current_time)
+
+            status[exchange] = {
+                'tokens_available': bucket['tokens'],
+                'rate_limit': self.get_rate_limit(exchange),
+                'in_backoff': in_backoff,
+                'backoff_remaining': backoff_remaining if in_backoff else 0
+            }
+
         return status
     
     def wait_if_needed(self, exchange: str) -> float:
@@ -201,20 +202,18 @@ class RateLimiter:
             Time until next request can be made (0 if ready now)
         """
         exchange = exchange.lower()
-        
-        with self.lock:
+
+        with self.locks[exchange]:
             bucket = self.buckets[exchange]
             current_time = time.time()
-            
-            # Check backoff
+
             if current_time < bucket['backoff_until']:
                 return bucket['backoff_until'] - current_time
-            
-            # Check tokens
+
             if bucket['tokens'] < 1:
                 rate_limit = self.get_rate_limit(exchange)
                 return (1 - bucket['tokens']) / rate_limit
-            
+
             return 0
 
 

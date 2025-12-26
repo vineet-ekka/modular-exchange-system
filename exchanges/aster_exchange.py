@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class AsterExchange(BaseExchange):
@@ -396,8 +397,8 @@ class AsterExchange(BaseExchange):
                 # Update current_end to the earliest timestamp we got
                 current_end = min(item['fundingTime'] for item in data) - 1
 
-                # Small delay to respect rate limits
-                time.sleep(0.1)
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('aster')
 
             if not all_rates:
                 self.logger.warning(f"No historical data for {symbol}")
@@ -511,8 +512,8 @@ class AsterExchange(BaseExchange):
                     progress = ((i + 1) / len(symbols)) * 100
                     progress_callback(i + 1, len(symbols), progress, f"Processing {symbol}")
 
-                # Small delay to respect rate limits (2400 requests per minute = 40 per second max)
-                time.sleep(0.1)  # Conservative delay
+                # Respect rate limits via token bucket
+                rate_limiter.acquire('aster')
 
             except Exception as e:
                 self.logger.error(f"Error fetching historical data for {symbol}: {e}")

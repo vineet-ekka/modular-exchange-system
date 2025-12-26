@@ -1,5 +1,6 @@
 import React from 'react';
-import styles from './ArbitrageFilter.module.css';
+import { Button } from '../ui/button';
+import { cn } from '@/lib/utils';
 
 const FUNDING_INTERVALS = [
   { hours: 1, label: '1 hour' },
@@ -28,25 +29,30 @@ export const IntervalSelector: React.FC<IntervalSelectorProps> = ({
   };
 
   return (
-    <div className={styles.filterSection}>
-      <div className={styles.sectionLabel}>Funding Intervals</div>
+    <div className="mb-6 last:mb-0">
+      <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider mb-3">
+        Funding Intervals
+      </div>
 
-      <div className={styles.intervalPills}>
+      <div className="flex flex-wrap gap-2">
         {FUNDING_INTERVALS.map(({ hours, label }) => (
-          <button
+          <Button
             key={hours}
+            variant={selectedIntervals.has(hours) ? "default" : "outline"}
+            size="sm"
             onClick={() => toggleInterval(hours)}
-            className={`${styles.intervalPill} ${
-              selectedIntervals.has(hours) ? styles.selected : ''
-            }`}
+            className={cn(
+              "rounded-full px-3.5",
+              !selectedIntervals.has(hours) && "text-muted-foreground hover:text-foreground"
+            )}
           >
             {label}
-          </button>
+          </Button>
         ))}
       </div>
 
       {selectedIntervals.size === 0 && (
-        <p style={{ marginTop: '8px', fontSize: '12px', color: '#A3A3A3' }}>
+        <p className="mt-2 text-xs text-muted-foreground">
           No intervals selected - showing all opportunities
         </p>
       )}

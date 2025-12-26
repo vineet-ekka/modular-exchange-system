@@ -28,7 +28,6 @@ from exchanges.drift_exchange import DriftExchange
 from exchanges.aster_exchange import AsterExchange
 from exchanges.lighter_exchange import LighterExchange
 from exchanges.bybit_exchange import ByBitExchange
-# from exchanges.paradex_exchange import ParadexExchange
 from exchanges.pacifica_exchange import PacificaExchange
 from exchanges.hibachi_exchange import HibachiExchange
 from exchanges.mexc_exchange import MexcExchange
@@ -141,17 +140,26 @@ class UnifiedBackfill:
         """Atomically write JSON status file to prevent corruption on crash."""
         temp_path = file_path.with_suffix('.tmp')
         try:
-            # Write to temp file
             with open(temp_path, 'w') as f:
-                json.dump(data, f, indent=2)
+                json.dump(data, f, indent=2, default=str)
                 f.flush()
-                os.fsync(f.fileno())  # Ensure data is written to disk
+                os.fsync(f.fileno())
 
-            # Atomic rename (on POSIX, mostly atomic on Windows)
-            temp_path.replace(file_path)
+            for attempt in range(3):
+                try:
+                    temp_path.replace(file_path)
+                    return
+                except PermissionError:
+                    if attempt < 2:
+                        time.sleep(0.1 * (attempt + 1))
+                    else:
+                        with open(file_path, 'w') as f:
+                            json.dump(data, f, indent=2, default=str)
+                        if temp_path.exists():
+                            temp_path.unlink()
+                        return
         except Exception as e:
             logger.error(f"Failed to write status file {file_path}: {e}")
-            # Clean up temp file if it exists
             if temp_path.exists():
                 try:
                     temp_path.unlink()
@@ -633,8 +641,8 @@ def main():
     parser.add_argument(
         '--max-workers',
         type=int,
-        default=2,
-        help='Maximum parallel workers (default: 2)'
+        default=13,
+        help='Maximum parallel workers (default: 13, one per exchange)'
     )
     parser.add_argument(
         '--dry-run',

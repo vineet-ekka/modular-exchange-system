@@ -12,6 +12,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 from .base_exchange import BaseExchange
 from utils.logger import setup_logger
+from utils.rate_limiter import rate_limiter
 
 
 class HibachiExchange(BaseExchange):
@@ -203,8 +204,8 @@ class HibachiExchange(BaseExchange):
             # Fetch funding rates for each symbol
             for symbol in markets_df['symbol'].tolist():
                 try:
-                    # Rate limit between requests
-                    time.sleep(0.1)
+                    # Respect rate limits via token bucket
+                    rate_limiter.acquire('hibachi')
                     
                     # Fetch funding rate for this symbol using the correct endpoint
                     url = f"{self.base_url}/market/data/funding-rates"
@@ -280,8 +281,8 @@ class HibachiExchange(BaseExchange):
             
             for symbol in funding_df['symbol'].tolist():
                 try:
-                    # Rate limit between requests
-                    time.sleep(0.05)
+                    # Respect rate limits via token bucket
+                    rate_limiter.acquire('hibachi')
                     
                     # Fetch open interest for this symbol
                     url = f"{self.base_url}/market/data/open-interest"
@@ -567,8 +568,8 @@ class HibachiExchange(BaseExchange):
                         progress = (symbols_processed / total_symbols) * 100
                         progress_callback(symbols_processed, total_symbols, progress, f"Processing {symbol}")
                     
-                    # Rate limiting
-                    time.sleep(0.2)
+                    # Respect rate limits via token bucket
+                    rate_limiter.acquire('hibachi')
             
             # Combine all data
             if all_historical_data:

@@ -1247,7 +1247,9 @@ async def get_contract_level_arbitrage_opportunities(
     min_apr: Optional[float] = Query(None, description="Minimum APR spread percentage"),
     max_apr: Optional[float] = Query(None, description="Maximum APR spread percentage"),
     min_oi_either: Optional[float] = Query(None, description="Minimum open interest for either position"),
-    min_oi_combined: Optional[float] = Query(None, description="Minimum combined open interest")
+    min_oi_combined: Optional[float] = Query(None, description="Minimum combined open interest"),
+    sort_by: str = Query("apr_spread", description="Sort field: apr_spread, rate_spread, spread_zscore, open_interest"),
+    sort_dir: str = Query("desc", description="Sort direction: asc or desc")
 ):
     """
     Get contract-specific arbitrage opportunities with correct Z-scores.
@@ -1291,7 +1293,7 @@ async def get_contract_level_arbitrage_opportunities(
         # Use normalized exchanges for cache key to ensure uniqueness
         filter_hash = hashlib.md5(
             f"{sorted(assets or [])}{sorted(exchanges or [])}{sorted(intervals or [])}"
-            f"{min_apr}{max_apr}{min_oi_either}{min_oi_combined}".encode()
+            f"{min_apr}{max_apr}{min_oi_either}{min_oi_combined}{sort_by}{sort_dir}".encode()
         ).hexdigest()[:8]
         cache_key = f"arbitrage:v2:{page}:{page_size}:{min_spread}:{filter_hash}"
 
@@ -1324,7 +1326,9 @@ async def get_contract_level_arbitrage_opportunities(
             min_apr=min_apr,
             max_apr=max_apr,
             min_oi_either=min_oi_either,
-            min_oi_combined=min_oi_combined
+            min_oi_combined=min_oi_combined,
+            sort_by=sort_by,
+            sort_dir=sort_dir
         )
 
         # Sanitize the result to remove NaN/Infinity values
@@ -1347,14 +1351,16 @@ async def get_contract_level_arbitrage_opportunities(
                 'min_apr': min_apr,
                 'max_apr': max_apr,
                 'min_oi_either': min_oi_either,
-                'min_oi_combined': min_oi_combined
+                'min_oi_combined': min_oi_combined,
+                'sort_by': sort_by,
+                'sort_dir': sort_dir
             },
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'version': 'v2-contract-level-paginated'
         })
 
-        # Cache the result - reduced to 30s to match data update cycle
-        api_cache.set(cache_key, sanitized_result, ttl_seconds=15)  # Cache for 15 seconds for fresher Z-scores
+        # Cache the result - aligned with 30s data collection cycle
+        api_cache.set(cache_key, sanitized_result, ttl_seconds=30)
         logger.info(f"Cached arbitrage page {page}")
 
         return sanitized_result
@@ -1372,33 +1378,99 @@ async def get_arbitrage_opportunity_detail(
     """
     Get detailed information for a specific arbitrage opportunity.
     Includes historical data and extended statistics for the specific pair.
+    Uses direct SQL query instead of recalculating all opportunities.
     """
     try:
-        # Import the scanner to get current opportunity
-        from utils.arbitrage_scanner import calculate_contract_level_arbitrage
+        # Check cache first
+        cache_key = f"arb_detail:{asset.upper()}:{long_exchange.lower()}:{short_exchange.lower()}"
+        cached = api_cache.get(cache_key)
+        if cached:
+            return cached
 
-        # Get all opportunities and find the specific one
-        result = calculate_contract_level_arbitrage(min_spread=0, page=1, page_size=1000)
-
-        # Find the specific opportunity
-        opportunity = None
-        for opp in result['opportunities']:
-            if (opp['asset'].upper() == asset.upper() and
-                opp['long_exchange'].lower() == long_exchange.lower() and
-                opp['short_exchange'].lower() == short_exchange.lower()):
-                opportunity = opp
-                break
-
-        if not opportunity:
-            raise HTTPException(status_code=404, detail="Opportunity not found")
-
-        # Get historical data for this specific pair from the database
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         try:
+            # Direct query for specific pair - no need to recalculate all opportunities
+            pair_query = """
+                SELECT
+                    ed_long.base_asset as asset,
+                    ed_long.exchange as long_exchange,
+                    ed_long.symbol as long_contract,
+                    ed_long.funding_rate as long_rate,
+                    ed_long.open_interest as long_open_interest,
+                    ed_long.funding_interval_hours as long_interval_hours,
+                    ed_short.exchange as short_exchange,
+                    ed_short.symbol as short_contract,
+                    ed_short.funding_rate as short_rate,
+                    ed_short.open_interest as short_open_interest,
+                    ed_short.funding_interval_hours as short_interval_hours,
+                    fs_long.z_score as long_zscore,
+                    fs_short.z_score as short_zscore
+                FROM exchange_data ed_long
+                JOIN exchange_data ed_short
+                    ON ed_long.base_asset = ed_short.base_asset
+                LEFT JOIN funding_statistics fs_long
+                    ON ed_long.exchange = fs_long.exchange AND ed_long.symbol = fs_long.symbol
+                LEFT JOIN funding_statistics fs_short
+                    ON ed_short.exchange = fs_short.exchange AND ed_short.symbol = fs_short.symbol
+                WHERE ed_long.base_asset = %s
+                    AND LOWER(ed_long.exchange) = %s
+                    AND LOWER(ed_short.exchange) = %s
+                    AND ed_long.funding_rate IS NOT NULL
+                    AND ed_short.funding_rate IS NOT NULL
+            """
+            cur.execute(pair_query, (asset.upper(), long_exchange.lower(), short_exchange.lower()))
+            row = cur.fetchone()
+
+            if not row:
+                raise HTTPException(status_code=404, detail="Opportunity not found")
+
+            # Calculate spreads and APR
+            long_rate = row['long_rate'] or 0
+            short_rate = row['short_rate'] or 0
+            long_interval = row['long_interval_hours'] or 8
+            short_interval = row['short_interval_hours'] or 8
+
+            rate_spread = abs(short_rate - long_rate)
+            rate_spread_pct = rate_spread * 100
+
+            # APR calculation using LCM of intervals for fair comparison
+            from math import gcd
+            lcm_hours = (long_interval * short_interval) // gcd(long_interval, short_interval)
+            long_periods = lcm_hours / long_interval
+            short_periods = lcm_hours / short_interval
+            sync_spread = (abs(long_rate) * long_periods) + (abs(short_rate) * short_periods)
+            periods_per_year = (365 * 24) / lcm_hours
+            apr_spread = sync_spread * periods_per_year * 100
+
+            # Effective hourly spread
+            effective_hourly = (abs(long_rate) / long_interval) + (abs(short_rate) / short_interval)
+            daily_spread = effective_hourly * 24 * 100
+
+            opportunity = {
+                'asset': row['asset'],
+                'long_exchange': row['long_exchange'],
+                'long_contract': row['long_contract'],
+                'long_rate': long_rate,
+                'long_open_interest': row['long_open_interest'],
+                'long_interval_hours': long_interval,
+                'long_zscore': row['long_zscore'],
+                'short_exchange': row['short_exchange'],
+                'short_contract': row['short_contract'],
+                'short_rate': short_rate,
+                'short_open_interest': row['short_open_interest'],
+                'short_interval_hours': short_interval,
+                'short_zscore': row['short_zscore'],
+                'rate_spread': rate_spread,
+                'rate_spread_pct': rate_spread_pct,
+                'apr_spread': apr_spread,
+                'daily_spread': daily_spread,
+                'effective_hourly_spread': effective_hourly * 100
+            }
+
             # Get 30-day historical spread data
-            query = """
+            hist_query = """
                 SELECT
                     DATE_TRUNC('day', timestamp) as date,
                     AVG(apr_spread) as avg_apr_spread,
@@ -1413,28 +1485,23 @@ async def get_arbitrage_opportunity_detail(
                 GROUP BY DATE_TRUNC('day', timestamp)
                 ORDER BY date DESC
             """
-
-            cur.execute(query, (
-                asset,
+            cur.execute(hist_query, (
+                asset.upper(),
                 long_exchange, short_exchange,
                 short_exchange, long_exchange
             ))
             historical_data = cur.fetchall()
 
-            # Calculate additional statistics
+            # Calculate 30-day statistics
+            avg_30d = max_30d = min_30d = None
             if historical_data:
-                all_spreads = [row['avg_apr_spread'] for row in historical_data if row['avg_apr_spread']]
+                all_spreads = [r['avg_apr_spread'] for r in historical_data if r['avg_apr_spread']]
                 if all_spreads:
                     avg_30d = sum(all_spreads) / len(all_spreads)
                     max_30d = max(all_spreads)
                     min_30d = min(all_spreads)
-                else:
-                    avg_30d = max_30d = min_30d = None
-            else:
-                avg_30d = max_30d = min_30d = None
 
-            # Return enriched opportunity data
-            return {
+            result = {
                 'opportunity': opportunity,
                 'historical': {
                     'daily_data': historical_data,
@@ -1447,6 +1514,10 @@ async def get_arbitrage_opportunity_detail(
                 },
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
+
+            # Cache for 30 seconds
+            api_cache.set(cache_key, result, ttl_seconds=30)
+            return result
 
         finally:
             cur.close()
